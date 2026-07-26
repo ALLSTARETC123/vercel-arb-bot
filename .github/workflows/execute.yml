@@ -3,16 +3,15 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '*/3 * * * *'
+env:
+  CACHE_BUST: ${{ github.run_id }}
 jobs:
   swap:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - run: npm install @solana/web3.js bs58@5
+      - run: npm install @solana/web3.js bs58@5 --no-cache
       - name: Execute swaps and settle profits
         env:
           SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
-        run: |
-          echo "START EXECUTION"
-          node swap-execute.js 2>&1
-          echo "END EXECUTION"
+        run: node swap-execute.js 2>&1
