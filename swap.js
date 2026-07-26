@@ -29,47 +29,58 @@ async function executeSwap(wallet, connection, inp, out, amt, legName) {
 }
 
 async function settleProfit(wallet, connection) {
-  const TX_FEE = 5000;
-  const balance = await connection.getBalance(wallet.publicKey);
-  console.log(`[Settlement] Executor balance: ${balance} lamports`);
-  
-  if (balance <= TX_FEE) {
-    console.log(`[Settlement] Insufficient balance. Skipping transfer.`);
-    return null;
-  }
-  
-  const transferAmount = balance - TX_FEE;
-  console.log(`[Settlement] Transferring ${transferAmount} lamports to ${SETTLEMENT_WALLET}`);
-  
-  const recipientPubkey = new PublicKey(SETTLEMENT_WALLET);
-  const instruction = SystemProgram.transfer({
-    fromPubkey: wallet.publicKey,
-    toPubkey: recipientPubkey,
-    lamports: transferAmount,
-  });
-  
-  const { blockhash } = await connection.getLatestBlockhash();
-  const messageV0 = new (require('@solana/web3.js').TransactionMessage)({
-    payerKey: wallet.publicKey,
-    recentBlockhash: blockhash,
-    instructions: [instruction],
-  }).compileToV0Message();
-  
-  const tx = new (require('@solana/web3.js').VersionedTransaction)(messageV0);
-  tx.sign([wallet]);
-  
   try {
-    const txid = await connection.sendRawTransaction(tx.serialize());
-    console.log(`[Settlement] TX submitted: https://solscan.io/tx/${txid}`);
-    const confirmation = await connection.confirmTransaction(txid);
-    if (confirmation.value.err) {
-      console.log(`[Settlement ERROR] TX failed: ${confirmation.value.err}`);
+    console.log(`[Settlement] Starting settlement for wallet: ${wallet.publicKey.toString()}`);
+    const TX_FEE = 5000;
+    const balance = await connection.getBalance(wallet.publicKey);
+    console.log(`[Settlement] Executor balance: ${balance} lamports`);
+    
+    if (balance <= TX_FEE) {
+      console.log(`[Settlement] Insufficient balance (${balance} lamports). Skipping transfer.`);
       return null;
     }
-    console.log(`[Settlement SUCCESS] ${transferAmount} lamports transferred`);
+    
+    const transferAmount = balance - TX_FEE;
+    console.log(`[Settlement] Will transfer: ${transferAmount} lamports to ${SETTLEMENT_WALLET}`);
+    
+    const recipientPubkey = new PublicKey(SETTLEMENT_WALLET);
+    const instruction = SystemProgram.transfer({
+      fromPubkey: wallet.publicKey,
+      toPubkey: recipientPubkey,
+      lamports: transferAmount,
+    });
+    console.log(`[Settlement] Instruction built`);
+    
+    const { blockhash } = await connection.getLatestBlockhash();
+    console.log(`[Settlement] Latest blockhash: ${blockhash}`);
+    
+    const { TransactionMessage } = require('@solana/web3.js');
+    const messageV0 = new TransactionMessage({
+      payerKey: wallet.publicKey,
+      recentBlockhash: blockhash,
+      instructions: [instruction],
+    }).compileToV0Message();
+    console.log(`[Settlement] Message compiled`);
+    
+    const { VersionedTransaction: VT } = require('@solana/web3.js');
+    const tx = new VT(messageV0);
+    tx.sign([wallet]);
+    console.log(`[Settlement] Transaction signed`);
+    
+    const txid = await connection.sendRawTransaction(tx.serialize());
+    console.log(`[Settlement] TX submitted: https://solscan.io/tx/${txid}`);
+    
+    const confirmation = await connection.confirmTransaction(txid);
+    if (confirmation.value.err) {
+      console.log(`[Settlement ERROR] TX failed: ${JSON.stringify(confirmation.value.err)}`);
+      return null;
+    }
+    
+    console.log(`[Settlement SUCCESS] ${transferAmount} lamports transferred to ${SETTLEMENT_WALLET}`);
     return txid;
   } catch (e) {
-    console.log(`[Settlement ERROR] ${e.message}`);
+    console.log(`[Settlement EXCEPTION] ${e.message}`);
+    console.log(`[Settlement EXCEPTION STACK] ${e.stack}`);
     return null;
   }
 }
@@ -101,7 +112,7 @@ async function settleProfit(wallet, connection) {
     if (!tx3) return console.log("[Error] Leg 3 failed.");
     console.log(`[SUCCESS] Arbitrage complete. Profit: ${profit} lamports`);
     
-    console.log('[Settlement] Starting settlement process...');
+    console.log('[Settlement] Calling settlement...');
     await settleProfit(wallet, connection);
   } else {
     console.log(`Aborted: Profit ${profit} does not cover ${MIN_PROFIT} threshold.`);
