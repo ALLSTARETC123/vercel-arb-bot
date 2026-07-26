@@ -1,0 +1,27 @@
+name: Real Swap Execution
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/3 * * * *'
+jobs:
+  swap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Node
+        run: npm install @solana/web3.js bs58@5
+      
+      - name: Execute real swaps
+        env:
+          SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
+        run: node swap.js
+      
+      - name: Settle profits to designated wallet
+        env:
+          SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
+        run: node settlement.js
+        if: success()
+      
+      - name: Cleanup
+        run: echo "Workflow complete"
