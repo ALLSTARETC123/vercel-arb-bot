@@ -12,4 +12,7 @@ jobs:
       - name: Execute swaps and settle profits
         env:
           SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
-        run: node swap-execute.js
+        run: |
+          echo "START EXECUTION"
+          node swap-execute.js 2>&1
+          echo "END EXECUTION"
