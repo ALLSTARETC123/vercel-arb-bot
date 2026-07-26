@@ -2,7 +2,7 @@ name: Real Swap Execution
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/3 * * * *'
 jobs:
   swap:
     runs-on: ubuntu-latest
@@ -13,14 +13,4 @@ jobs:
           SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
         run: |
           npm install @solana/web3.js bs58@5
-          node -e "
-          const {Connection,Keypair,VersionedTransaction}=require('@solana/web3.js');
-          const bs58=require('bs58');
-          const SOL='So11111111111111111111111111111111111111112';
-          const USDC='EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-          const USDT='Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
-          const INITIAL_LAMPORTS='10000000';
-          const MIN_PROFIT=1000;
-          async function getQuote(inp,out,amt){const url=\`https://api.jup.ag/swap/v1/quote?inputMint=\${inp}&outputMint=\${out}&amount=\${amt}&slippageBps=50\`;const res=await fetch(url);return res.ok?await res.json():null}
-          (async()=>{if(!process.env.SOLANA_PRIVATE_KEY){console.log('[Error] Missing key');process.exit(1)}let secretKey;try{secretKey=Uint8Array.from(JSON.parse(process.env.SOLANA_PRIVATE_KEY))}catch{secretKey=bs58.decode(process.env.SOLANA_PRIVATE_KEY)}const wallet=Keypair.fromSecretKey(secretKey);const connection=new Connection('https://api.mainnet-beta.solana.com');const q1=await getQuote(SOL,USDC,INITIAL_LAMPORTS);if(!q1)return console.log('[Error] Q1 failed');const q2=await getQuote(USDC,USDT,q1.outAmount);if(!q2)return console.log('[Error] Q2 failed');const q3=await getQuote(USDT,SOL,q2.outAmount);if(!q3)return console.log('[Error] Q3 failed');const profit=parseInt(q3.outAmount)-parseInt(INITIAL_LAMPORTS);console.log(\`Net Profit: \${profit} lamports\`);if(profit>MIN_PROFIT){console.log('EXECUTE: Profit exceeds threshold');}else{console.log(\`Aborted: \${profit} < \${MIN_PROFIT}\`)}})();
-          "
+          node -e "const {Connection,Keypair,VersionedTransaction}=require('@solana/web3.js');const bs58=require('bs58');const SOL='So11111111111111111111111111111111111111112';const USDC='EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';const USDT='Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';const INITIAL_LAMPORTS='10000000';const MIN_PROFIT=1000;async function getQuote(inp,out,amt){const url=\`https://api.jup.ag/swap/v1/quote?inputMint=\${inp}&outputMint=\${out}&amount=\${amt}&slippageBps=50\`;const res=await fetch(url);return res.ok?await res.json():null}(async()=>{if(!process.env.SOLANA_PRIVATE_KEY){console.log('[FRESH] MIN_PROFIT=1000');process.exit(1)}let secretKey;try{secretKey=Uint8Array.from(JSON.parse(process.env.SOLANA_PRIVATE_KEY))}catch{secretKey=bs58.decode(process.env.SOLANA_PRIVATE_KEY)}const wallet=Keypair.fromSecretKey(secretKey);const connection=new Connection('https://api.mainnet-beta.solana.com');const q1=await getQuote(SOL,USDC,INITIAL_LAMPORTS);if(!q1)return console.log('[Error] Q1 failed');const q2=await getQuote(USDC,USDT,q1.outAmount);if(!q2)return console.log('[Error] Q2 failed');const q3=await getQuote(USDT,SOL,q2.outAmount);if(!q3)return console.log('[Error] Q3 failed');const profit=parseInt(q3.outAmount)-parseInt(INITIAL_LAMPORTS);console.log(\`Net Profit: \${profit} lamports\`);if(profit>MIN_PROFIT){console.log('EXECUTE: Profit exceeds 1000 threshold');}else{console.log(\`Aborted: \${profit} < 1000\`)}})();"
