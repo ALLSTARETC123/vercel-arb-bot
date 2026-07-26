@@ -9,7 +9,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       
-      - name: Setup Node
+      - name: Install dependencies
         run: npm install @solana/web3.js bs58@5
       
       - name: Execute real swaps
@@ -22,6 +22,3 @@ jobs:
           SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
         run: node settlement.js
         if: success()
-      
-      - name: Cleanup
-        run: echo "Workflow complete"
