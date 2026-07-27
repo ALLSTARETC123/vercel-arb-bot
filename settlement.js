@@ -30,7 +30,15 @@ async function settleProfit() {
   }
 
   // Calculate net transferable amount (balance - fee for this tx)
-  const transferAmount = balance - TX_FEE;
+  
+    const MIN_RESERVE = 2000000; // 0.002 SOL reserve for gas
+    const balance = await connection.getBalance(keypair.publicKey);
+    if (balance <= MIN_RESERVE) {
+      console.log("[Settlement] Balance (" + balance + " lamports) below reserve limit. Skipping transfer.");
+      return;
+    }
+    const transferAmount = balance - MIN_RESERVE - 5000;
+  
   console.log(`[Settlement] Transferring ${transferAmount} lamports to ${SETTLEMENT_WALLET}`);
 
   // Build transfer instruction
