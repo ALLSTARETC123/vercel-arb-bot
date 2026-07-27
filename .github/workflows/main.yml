@@ -2,8 +2,12 @@ name: Solana Arbitrage Engine
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/15 * * * *'
   workflow_dispatch:
+
+concurrency:
+  group: solana-arbitrage
+  cancel-in-progress: true
 
 permissions:
   actions: write
@@ -18,17 +22,17 @@ jobs:
         with:
           node-version: '24'
       - run: npm ci
-      - name: High-Frequency Continuous Scan
+      - name: Continuous Scan Engine
         env:
           SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
           SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
           DESTINATION_WALLET: ${{ secrets.DESTINATION_WALLET }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          END_TIME=$(( $(date +%s) + 60 ))
+          END_TIME=$(( $(date +%s) + 600 ))
           while [ $(date +%s) -lt $END_TIME ]; do
             node swap-execute.js || true
             node settlement.js || true
-            sleep 3
+            sleep 10
           done
           gh workflow run main.yml --repo ${{ github.repository }}
