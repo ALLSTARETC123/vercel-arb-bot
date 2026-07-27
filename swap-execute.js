@@ -1,5 +1,5 @@
-import { Connection, Keypair, VersionedTransaction } from '@solana/web3.js';
-import bs58 from 'bs58';
+const { Connection, Keypair, VersionedTransaction } = require('@solana/web3.js');
+const bs58 = require('bs58');
 
 const RPC_URL = process.env.SOLANA_RPC_URL;
 const PRIVATE_KEY = process.env.SOLANA_PRIVATE_KEY;
@@ -8,6 +8,11 @@ const OUTPUT_MINT = process.env.OUTPUT_MINT;
 const TRADE_AMOUNT = parseInt(process.env.TRADE_AMOUNT, 10);
 const MIN_PROFIT_THRESHOLD = parseInt(process.env.MIN_PROFIT_THRESHOLD, 10);
 
+if (!RPC_URL || !PRIVATE_KEY || !INPUT_MINT || !OUTPUT_MINT || isNaN(TRADE_AMOUNT) || isNaN(MIN_PROFIT_THRESHOLD)) {
+  console.error('[CONFIGURATION ERROR] Missing or invalid environment variables.');
+  process.exit(1);
+}
+
 const connection = new Connection(RPC_URL, 'confirmed');
 const secretKey = bs58.decode(PRIVATE_KEY);
 const wallet = Keypair.fromSecretKey(secretKey);
@@ -15,7 +20,10 @@ const wallet = Keypair.fromSecretKey(secretKey);
 async function fetchQuote(input, output, amount) {
   const url = `https://api.jup.ag/swap/v1/quote?inputMint=${input}&outputMint=${output}&amount=${amount}&slippageBps=50`;
   const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
-  if (!res.ok) throw new Error(`Quote API status ${res.status}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Quote API ${res.status}: ${text}`);
+  }
   return await res.json();
 }
 
@@ -44,6 +52,11 @@ async function executeSwap(quoteResponse) {
       prioritizationFeeLamports: 'auto'
     })
   });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Swap API ${res.status}: ${text}`);
+  }
 
   const { swapTransaction } = await res.json();
   const swapTransactionBuf = Buffer.from(swapTransaction, 'base64');
@@ -79,6 +92,7 @@ async function runEngine() {
     }
   } catch (err) {
     console.error(`[EXECUTION ERROR] ${err.message}`);
+    process.exit(1);
   }
 }
 
