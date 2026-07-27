@@ -109,12 +109,22 @@ const TOKEN_DECIMALS = {
     .filter((ix) => ix.programId !== ataProgramId)
     .map(parseInstruction);
 
+  const addressLookupTableAccounts = [];
+  if (instructionsData.addressLookupTableAddresses && instructionsData.addressLookupTableAddresses.length > 0) {
+    for (const altAddress of instructionsData.addressLookupTableAddresses) {
+      const altAccount = await connection.getAddressLookupTable(new PublicKey(altAddress));
+      if (altAccount.value) {
+        addressLookupTableAccounts.push(altAccount.value);
+      }
+    }
+  }
+
   const { blockhash } = await connection.getLatestBlockhash('confirmed');
   const messageV0 = new TransactionMessage({
     payerKey: wallet.publicKey,
     recentBlockhash: blockhash,
     instructions: filteredInstructions
-  }).compileToV0Message();
+  }).compileToV0Message(addressLookupTableAccounts);
 
   const transaction = new VersionedTransaction(messageV0);
   transaction.sign([wallet]);
