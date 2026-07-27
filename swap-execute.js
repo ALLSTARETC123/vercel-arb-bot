@@ -1,5 +1,23 @@
-import { Connection, Keypair, PublicKey, VersionedTransaction } from '@solana/web3.js';
+import { Connection, Keypair, VersionedTransaction } from '@solana/web3.js';
 import bs58 from 'bs58';
+
+async function fetchWithRetry(url, options = {}, retries = 3) {
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+    'Accept': 'application/json',
+    ...(options.headers || {})
+  };
+  for (let i = 0; i < retries; i++) {
+    try {
+      const res = await fetch(url, { ...options, headers });
+      if (res.ok) return res;
+    } catch (err) {
+      if (i === retries - 1) throw err;
+      await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
+    }
+  }
+  throw new Error(`Failed to reach endpoint ${url}`);
+}
 
 async function executeSwap() {
   const rpcUrl = process.env.SOLANA_RPC_URL;
@@ -19,34 +37,47 @@ async function executeSwap() {
   const outputMint = process.env.OUTPUT_MINT || wsolMint;
 
   const quoteUrl = `https://quote-api.jup.ag/v6/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${tradeAmount}&slippageBps=50`;
-  const quoteResponse = await fetch(quoteUrl);
-  const quoteData = await quoteResponse.json();
+
+  let quoteData;
+  try {
+    const quoteResponse = await fetchWithRetry(quoteUrl);
+    quoteData = await quoteResponse.json();
+  } catch (e) {
+    console.log(`Quote request failed: ${e.message}`);
+    process.exit(0);
+  }
 
   if (!quoteData || quoteData.error || !quoteData.outAmount) {
-    console.log('No valid swap route returned from quote API.');
+    console.log('No valid route returned.');
     process.exit(0);
   }
 
   if (inputMint === outputMint && BigInt(quoteData.outAmount) <= BigInt(tradeAmount)) {
-    console.log(`No profitable margin: input ${tradeAmount} lamports, output ${quoteData.outAmount} lamports.`);
+    console.log(`No profit margin: input ${tradeAmount}, output ${quoteData.outAmount}.`);
     process.exit(0);
   }
 
-  const swapResponse = await fetch('https://quote-api.jup.ag/v6/swap', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      quoteResponse: quoteData,
-      userPublicKey: wallet.publicKey.toString(),
-      wrapAndUnwrapSol: true,
-      dynamicComputeUnitLimit: true,
-      prioritizationFeeLamports: 'auto'
-    })
-  });
+  let swapData;
+  try {
+    const swapResponse = await fetchWithRetry('https://quote-api.jup.ag/v6/swap', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        quoteResponse: quoteData,
+        userPublicKey: wallet.publicKey.toString(),
+        wrapAndUnwrapSol: true,
+        dynamicComputeUnitLimit: true,
+        prioritizationFeeLamports: 'auto'
+      })
+    });
+    swapData = await swapResponse.json();
+  } catch (e) {
+    console.log(`Swap generation failed: ${e.message}`);
+    process.exit(0);
+  }
 
-  const swapData = await swapResponse.json();
   if (!swapData.swapTransaction) {
-    console.error('Failed to assemble swap transaction.');
+    console.error('Failed to construct transaction.');
     process.exit(1);
   }
 
