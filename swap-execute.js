@@ -37,7 +37,8 @@ const TOKEN_DECIMALS = {
 
   const requestHeaders = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    'Accept': 'application/json'
+    'Accept': 'application/json',
+    'Connection': 'keep-alive'
   };
 
   let bestOpportunity = null;
@@ -46,16 +47,19 @@ const TOKEN_DECIMALS = {
   for (const [inputMint, outputMint] of pairs) {
     try {
       const inputDecimals = TOKEN_DECIMALS[inputMint] || 9;
-      // Scale trade amount relative to input mint decimals
       const scaledAmount = Math.floor(baseTradeAmount * Math.pow(10, inputDecimals - 9));
 
       const url = `https://quote-api.jup.ag/v6/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${scaledAmount}&slippageBps=50&onlyDirectRoutes=false`;
-      const res = await fetch(url, { headers: requestHeaders });
+      
+      const res = await fetch(url, { 
+        headers: requestHeaders,
+        signal: AbortSignal.timeout(8000)
+      });
       
       if (!res.ok) {
         const errBody = await res.text();
         console.log(`API error status ${res.status} for pair ${inputMint.slice(0, 4)} -> ${outputMint.slice(0, 4)}: ${errBody}`);
-        await sleep(400);
+        await sleep(600);
         continue;
       }
       
@@ -76,7 +80,7 @@ const TOKEN_DECIMALS = {
     } catch (err) {
       console.log(`Scan warning on pair: ${err.message}`);
     }
-    await sleep(400);
+    await sleep(600);
   }
 
   if (!bestOpportunity || bestOpportunity.estimatedProfit < minProfitThreshold) {
