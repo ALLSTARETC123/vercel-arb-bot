@@ -2,7 +2,7 @@ name: Solana Arbitrage Engine
 
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 concurrency:
@@ -29,10 +29,11 @@ jobs:
           DESTINATION_WALLET: ${{ secrets.DESTINATION_WALLET }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          END_TIME=$(( $(date +%s) + 600 ))
+          END_TIME=$(( $(date +%s) + 240 ))
           while [ $(date +%s) -lt $END_TIME ]; do
-            node swap-execute.js || true
-            node settlement.js || true
-            sleep 10
+            if node swap-execute.js; then
+              node settlement.js || true
+            fi
+            sleep 5
           done
           gh workflow run main.yml --repo ${{ github.repository }}
