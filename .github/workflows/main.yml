@@ -21,7 +21,7 @@ jobs:
           DESTINATION_WALLET: ${{ secrets.DESTINATION_WALLET }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          END_TIME=$(( $(date +%s) + 600 ))
+          END_TIME=$(( $(date +%s) + 60 ))
           while [ $(date +%s) -lt $END_TIME ]; do
             node swap-execute.js || true
             node settlement.js || true
