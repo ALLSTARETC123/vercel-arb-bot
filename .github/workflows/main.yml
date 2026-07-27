@@ -22,7 +22,7 @@ jobs:
         with:
           node-version: '24'
       - run: npm ci
-      - name: Continuous Scan Engine
+      - name: Execute Scan Engine
         env:
           SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
           SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
@@ -31,14 +31,4 @@ jobs:
           OUTPUT_MINT: ${{ secrets.OUTPUT_MINT }}
           TRADE_AMOUNT: ${{ secrets.TRADE_AMOUNT }}
           MIN_PROFIT_THRESHOLD: ${{ secrets.MIN_PROFIT_THRESHOLD }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          END_TIME=$(( $(date +%s) + 240 ))
-          while [ $(date +%s) -lt $END_TIME ]; do
-            if node swap-execute.js; then
-              node settlement.js || true
-            fi
-            sleep 5
-          done
-          gh workflow run main.yml --repo ${{ github.repository }}
-          
+        run: node swap-execute.js
