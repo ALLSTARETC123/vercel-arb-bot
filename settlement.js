@@ -1,84 +1,68 @@
-const { Connection, Keypair, SystemProgram, sendAndConfirmTransaction, PublicKey } = require('@solana/web3.js');
-const bs58 = (require("bs58").default || require("bs58"));
+const { Connection, Keypair, PublicKey, Transaction, SystemProgram, sendAndConfirmTransaction } = require("@solana/web3.js");
+const bs58Import = require("bs58");
+const bs58 = bs58Import.default || bs58Import;
 
-const SETTLEMENT_WALLET = "3jDHtWFGUtiqpiJ72tnmoNj5b2HFBGBf8hzR3bdhuPNm";
-const TX_FEE = 5000; // base Solana tx fee
-
-async function settleProfit() {
-  if (!process.env.SOLANA_PRIVATE_KEY) {
-    console.log("[Error] SOLANA_PRIVATE_KEY missing for settlement.");
-    process.exit(1);
+function parsePrivateKey(rawKey) {
+  if (!rawKey) throw new Error("SOLANA_PRIVATE_KEY environment variable is missing.");
+  let cleaned = rawKey.trim();
+  if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+    cleaned = cleaned.slice(1, -1).trim();
   }
-
-  let secretKey;
-  try {
-    secretKey = Uint8Array.from(JSON.parse(process.env.SOLANA_PRIVATE_KEY));
-  } catch {
-    secretKey = bs58.decode(process.env.SOLANA_PRIVATE_KEY);
-  }
-
-  const wallet = Keypair.fromSecretKey(secretKey);
-  const connection = new Connection("https://api.mainnet-beta.solana.com");
-  
-  // Get current executor wallet balance
-  const balance = await connection.getBalance(wallet.publicKey);
-  console.log(`[Settlement] Executor balance: ${balance} lamports`);
-
-  if (balance <= TX_FEE) {
-    console.log(`[Settlement] Insufficient balance (${balance} lamports). Skipping transfer.`);
-    return null;
-  }
-
-  // Calculate net transferable amount (balance - fee for this tx)
-  
-    const MIN_RESERVE = 2000000; // 0.002 SOL reserve for gas
-    const balance = await connection.getBalance(keypair.publicKey);
-    if (balance <= MIN_RESERVE) {
-      console.log("[Settlement] Balance (" + balance + " lamports) below reserve limit. Skipping transfer.");
-      return;
+  let bytes;
+  if (cleaned.startsWith("[")) {
+    bytes = Uint8Array.from(JSON.parse(cleaned));
+  } else if (/^[0-9a-fA-F]+$/.test(cleaned) && (cleaned.length === 64 || cleaned.length === 128)) {
+    bytes = Uint8Array.from(Buffer.from(cleaned, "hex"));
+  } else {
+    try {
+      bytes = bs58.decode(cleaned);
+    } catch (e) {
+      bytes = Uint8Array.from(Buffer.from(cleaned, "base64"));
     }
-    const transferAmount = balance - MIN_RESERVE - 5000;
-  
-  console.log(`[Settlement] Transferring ${transferAmount} lamports to ${SETTLEMENT_WALLET}`);
-
-  // Build transfer instruction
-  const recipientPubkey = new PublicKey(SETTLEMENT_WALLET);
-  const instruction = SystemProgram.transfer({
-    fromPubkey: wallet.publicKey,
-    toPubkey: recipientPubkey,
-    lamports: transferAmount,
-  });
-
-  // Create and sign transaction
-  const { blockhash } = await connection.getLatestBlockhash();
-  const messageV0 = new (require('@solana/web3.js').TransactionMessage)({
-    payerKey: wallet.publicKey,
-    recentBlockhash: blockhash,
-    instructions: [instruction],
-  }).compileToV0Message();
-
-  const tx = new (require('@solana/web3.js').VersionedTransaction)(messageV0);
-  tx.sign([wallet]);
-
-  // Send and confirm
-  try {
-    const txid = await connection.sendRawTransaction(tx.serialize());
-    console.log(`[Settlement] TX submitted: https://solscan.io/tx/${txid}`);
-    
-    // Wait for confirmation
-    const confirmation = await connection.confirmTransaction(txid);
-    if (confirmation.value.err) {
-      console.log(`[Settlement ERROR] TX failed: ${confirmation.value.err}`);
-      return null;
-    }
-    
-    console.log(`[Settlement SUCCESS] ${transferAmount} lamports transferred to ${SETTLEMENT_WALLET}`);
-    console.log(`[Settlement] TXID: ${txid}`);
-    return txid;
-  } catch (e) {
-    console.log(`[Settlement ERROR] ${e.message}`);
-    return null;
+  }
+  if (bytes.length === 64) {
+    return Keypair.fromSecretKey(bytes);
+  } else if (bytes.length === 32) {
+    return Keypair.fromSeed(bytes);
+  } else {
+    throw new Error("Invalid key length: decoded " + bytes.length + " bytes.");
   }
 }
 
-settleProfit();
+async function runSettlement() {
+  const rpcUrl = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+  const connection = new Connection(rpcUrl, "confirmed");
+  const keypair = parsePrivateKey(process.env.SOLANA_PRIVATE_KEY);
+  const recipientPubkey = new PublicKey(process.env.DESTINATION_WALLET || "3jDHtWFGUtiqpiJ72tnmoNj5b2HFBGBf8hzR3bdhuPNm");
+
+  const BASE_OPERATIONAL_RESERVE = 2000000; // 0.002 SOL gas reserve
+  const MIN_PROFIT_THRESHOLD = 1000; // Minimum required profit in lamports
+  const ESTIMATED_TX_FEE = 5000; // Transaction fee for native transfer
+
+  const balance = await connection.getBalance(keypair.publicKey);
+  const netExcess = balance - BASE_OPERATIONAL_RESERVE;
+
+  if (netExcess < (MIN_PROFIT_THRESHOLD + ESTIMATED_TX_FEE)) {
+    console.log("[Settlement] Skipping sweep. Wallet balance: " + balance + " lamports. Operational reserve maintained: " + BASE_OPERATIONAL_RESERVE + " lamports. Available profit: " + (netExcess > 0 ? netExcess : 0) + " lamports (Required: " + MIN_PROFIT_THRESHOLD + ").");
+    return;
+  }
+
+  const sweepAmount = netExcess - ESTIMATED_TX_FEE;
+  console.log("[Settlement] Sweeping " + sweepAmount + " lamports profit to " + recipientPubkey.toBase58() + " while retaining " + BASE_OPERATIONAL_RESERVE + " lamports reserve.");
+
+  const transaction = new Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey: keypair.publicKey,
+      toPubkey: recipientPubkey,
+      lamports: sweepAmount,
+    })
+  );
+
+  const txid = await sendAndConfirmTransaction(connection, transaction, [keypair]);
+  console.log("[Settlement SUCCESS] Transferred " + sweepAmount + " lamports. TXID: " + txid);
+}
+
+runSettlement().catch((err) => {
+  console.error("[Settlement ERROR]", err.message);
+  process.exit(1);
+});
