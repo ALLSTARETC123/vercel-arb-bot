@@ -1,4 +1,4 @@
-import { Connection, Keypair, VersionedTransaction } from '@solana/web3.js';
+import { Connection, Keypair, VersionedTransaction, TransactionMessage, PublicKey } from '@solana/web3.js';
 import bs58 from 'bs58';
 
 async function fetchWithRetry(url, options = {}, retries = 3) {
@@ -52,39 +52,54 @@ async function executeSwap() {
     process.exit(0);
   }
 
-  if (inputMint === outputMint && BigInt(quoteData.outAmount) <= BigInt(tradeAmount)) {
-    console.log(`No profit margin: input ${tradeAmount}, output ${quoteData.outAmount}.`);
-    process.exit(0);
-  }
-
-  let swapData;
+  let instructionsData;
   try {
-    const swapResponse = await fetchWithRetry('https://api.jup.ag/swap/v1/swap', {
+    const instResponse = await fetchWithRetry('https://api.jup.ag/swap/v1/instructions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         quoteResponse: quoteData,
         userPublicKey: wallet.publicKey.toString(),
         wrapAndUnwrapSol: false,
-        useSharedAccounts: false,
-        directAccountOnly: true,
-        skipUserAccountsRpcCalls: true,
-        dynamicComputeUnitLimit: true,
-        prioritizationFeeLamports: 'auto'
+        useSharedAccounts: false
       })
     });
-    swapData = await swapResponse.json();
+    instructionsData = await instResponse.json();
   } catch (e) {
-    console.log(`Swap generation failed: ${e.message}`);
+    console.log(`Instructions fetch failed: ${e.message}`);
     process.exit(0);
   }
 
-  if (!swapData.swapTransaction) {
-    console.error('Failed to construct transaction.');
-    process.exit(1);
-  }
+  const parseInstruction = (ix) => ({
+    programId: new PublicKey(ix.programId),
+    keys: ix.accounts.map((acc) => ({
+      pubkey: new PublicKey(acc.pubkey),
+      isSigner: acc.isSigner,
+      isWritable: acc.isWritable
+    })),
+    data: Buffer.from(ix.data, 'base64')
+  });
 
-  const transaction = VersionedTransaction.deserialize(Buffer.from(swapData.swapTransaction, 'base64'));
+  const ataProgramId = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
+  const rawInstructions = [
+    ...(instructionsData.computeBudgetInstructions || []),
+    ...(instructionsData.setupInstructions || []),
+    instructionsData.swapInstruction,
+    ...(instructionsData.cleanupInstruction ? [instructionsData.cleanupInstruction] : [])
+  ].filter(Boolean);
+
+  const filteredInstructions = rawInstructions
+    .filter((ix) => ix.programId !== ataProgramId)
+    .map(parseInstruction);
+
+  const { blockhash } = await connection.getLatestBlockhash('confirmed');
+  const messageV0 = new TransactionMessage({
+    payerKey: wallet.publicKey,
+    recentBlockhash: blockhash,
+    instructions: filteredInstructions
+  }).compileToV0Message();
+
+  const transaction = new VersionedTransaction(messageV0);
   transaction.sign([wallet]);
 
   try {
