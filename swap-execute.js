@@ -24,7 +24,7 @@ try {
   if (trimmedKey.startsWith('[')) {
     secretKey = Uint8Array.from(JSON.parse(trimmedKey));
   } else {
-    secretKey = bs58.decode(trimmedKey);
+    secretKey = (bs58.decode || bs58.default?.decode)(trimmedKey);
   }
 } catch (err) {
   console.error('[KEY ERROR] Failed to parse SOLANA_PRIVATE_KEY:', err.message);
