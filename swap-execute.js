@@ -4,7 +4,7 @@ import bs58 from 'bs58';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 (async () => {
-  console.log('Robust fetch-based multi-pair scan engine initiated...');
+  console.log('Production arbitrage execution engine initialized...');
 
   const rpcUrl = process.env.SOLANA_RPC_URL;
   const privateKey = process.env.SOLANA_PRIVATE_KEY;
@@ -28,16 +28,20 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     ['DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', 'So11111111111111111111111111111111111111112']
   ];
 
+  const requestHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Accept': 'application/json'
+  };
+
   let bestOpportunity = null;
   let maxProfit = 0;
 
   for (const [inputMint, outputMint] of pairs) {
     try {
       const url = `https://quote-api.jup.ag/v6/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${tradeAmount}&slippageBps=50&onlyDirectRoutes=false`;
-      const res = await fetch(url);
+      const res = await fetch(url, { headers: requestHeaders });
       if (!res.ok) {
-        console.log(`Quote HTTP error ${res.status} for pair ${inputMint} -> ${outputMint}`);
-        await sleep(500);
+        await sleep(400);
         continue;
       }
       const quoteData = await res.json();
@@ -47,47 +51,44 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
         const outAmt = BigInt(quoteData.outAmount);
         const estimatedProfit = outAmt > inAmt ? Number(outAmt - inAmt) : 0;
 
-        console.log(`Checked pair ${inputMint.slice(0, 6)}... -> ${outputMint.slice(0, 6)}... | Profit: ${estimatedProfit} lamports`);
-
         if (estimatedProfit > maxProfit) {
           maxProfit = estimatedProfit;
           bestOpportunity = { quoteData, inputMint, outputMint, estimatedProfit };
         }
       }
     } catch (err) {
-      console.log(`Quote fetch exception: ${err.message}`);
+      // Silent catch for network drops during iteration
     }
     await sleep(400);
   }
 
   if (!bestOpportunity || bestOpportunity.estimatedProfit < minProfitThreshold) {
-    console.log(`Scan completed. Max profit found (${maxProfit} lamports) below threshold (${minProfitThreshold}). Exiting cleanly.`);
+    console.log(`Scan completed. Max profit found (${maxProfit} lamports) did not meet threshold (${minProfitThreshold}). Exiting cleanly.`);
     process.exit(0);
   }
 
-  console.log(`Profitable route found! Estimated Net Profit: ${bestOpportunity.estimatedProfit} lamports.`);
+  console.log(`Profitable route secured. Estimated net profit: ${bestOpportunity.estimatedProfit} lamports.`);
 
-  let instructionsData;
-  try {
-    const swapRes = await fetch('https://quote-api.jup.ag/v6/swap-instructions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        quoteResponse: bestOpportunity.quoteData,
-        userPublicKey: wallet.publicKey.toString(),
-        wrapAndUnwrapSol: false,
-        useSharedAccounts: false
-      })
-    });
-    if (!swapRes.ok) {
-      const errText = await swapRes.text();
-      throw new Error(`Swap instructions API error ${swapRes.status}: ${errText}`);
-    }
-    instructionsData = await swapRes.json();
-  } catch (e) {
-    console.error(`Instructions fetch failed: ${e.message}`);
-    process.exit(1);
+  const swapRes = await fetch('https://quote-api.jup.ag/v6/swap-instructions', {
+    method: 'POST',
+    headers: {
+      ...requestHeaders,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      quoteResponse: bestOpportunity.quoteData,
+      userPublicKey: wallet.publicKey.toString(),
+      wrapAndUnwrapSol: false,
+      useSharedAccounts: false
+    })
+  });
+
+  if (!swapRes.ok) {
+    const errText = await swapRes.text();
+    throw new Error(`Swap instructions endpoint returned error: ${errText}`);
   }
+
+  const instructionsData = await swapRes.json();
 
   const parseInstruction = (ix) => ({
     programId: new PublicKey(ix.programId),
@@ -121,17 +122,12 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const transaction = new VersionedTransaction(messageV0);
   transaction.sign([wallet]);
 
-  try {
-    const txid = await connection.sendRawTransaction(transaction.serialize(), {
-      skipPreflight: true,
-      maxRetries: 2
-    });
-    console.log(`Arbitrage transaction broadcasted: https://solscan.io/tx/${txid}`);
-  } catch (err) {
-    console.error(`Execution failed on-chain: ${err.message}`);
-    process.exit(1);
-  }
+  const txid = await connection.sendRawTransaction(transaction.serialize(), {
+    skipPreflight: true,
+    maxRetries: 2
+  });
+  console.log(`Arbitrage transaction broadcasted successfully: https://solscan.io/tx/${txid}`);
 })().catch((err) => {
-  console.error(`Fatal script error: ${err.stack || err.message}`);
+  console.error(`Execution error: ${err.stack || err.message}`);
   process.exit(1);
 });
