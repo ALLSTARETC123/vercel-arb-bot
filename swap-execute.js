@@ -111,6 +111,13 @@ async function executeSwap(quoteResponse) {
 
 async function runEngine() {
   try {
+    const balance = await connection.getBalance(wallet.publicKey);
+    console.log(`[WALLET CHECK] Address: ${wallet.publicKey.toString()} | Balance: ${balance} lamports`);
+
+    if (balance < TRADE_AMOUNT) {
+      throw new Error(`Insufficient SOL balance. Wallet has ${balance} lamports, but TRADE_AMOUNT is ${TRADE_AMOUNT} lamports.`);
+    }
+
     const { quote, netProfit } = await getRoundTripQuote();
     console.log(`[QUOTE EVALUATED] Net Profit: ${netProfit} lamports`);
 
