@@ -27,6 +27,10 @@ jobs:
           SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
           SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
           DESTINATION_WALLET: ${{ secrets.DESTINATION_WALLET }}
+          INPUT_MINT: ${{ secrets.INPUT_MINT }}
+          OUTPUT_MINT: ${{ secrets.OUTPUT_MINT }}
+          TRADE_AMOUNT: ${{ secrets.TRADE_AMOUNT }}
+          MIN_PROFIT_THRESHOLD: ${{ secrets.MIN_PROFIT_THRESHOLD }}
           GH_TOKEN: ${{ github.token }}
         run: |
           END_TIME=$(( $(date +%s) + 240 ))
@@ -37,3 +41,4 @@ jobs:
             sleep 5
           done
           gh workflow run main.yml --repo ${{ github.repository }}
+          
