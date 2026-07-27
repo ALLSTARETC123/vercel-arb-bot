@@ -1,11 +1,10 @@
 import { Connection, Keypair, VersionedTransaction, TransactionMessage, PublicKey } from '@solana/web3.js';
-import { createJupiterApiClient } from '@jup-ag/api';
 import bs58 from 'bs58';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 (async () => {
-  console.log('Sequential multi-pair scan engine initiated...');
+  console.log('Robust fetch-based multi-pair scan engine initiated...');
 
   const rpcUrl = process.env.SOLANA_RPC_URL;
   const privateKey = process.env.SOLANA_PRIVATE_KEY;
@@ -19,15 +18,14 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   const connection = new Connection(rpcUrl, 'confirmed');
   const wallet = Keypair.fromSecretKey(bs58.decode(privateKey));
-  const jupiterApi = createJupiterApiClient();
 
   const pairs = [
-    ['So11111111111111111111111111111111111111112', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'], // WSOL -> USDC
-    ['EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'So11111111111111111111111111111111111111112'], // USDC -> WSOL
-    ['So11111111111111111111111111111111111111112', 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN'], // WSOL -> JUP
-    ['JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', 'So11111111111111111111111111111111111111112'], // JUP -> WSOL
-    ['So11111111111111111111111111111111111111112', 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'], // WSOL -> BONK
-    ['DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', 'So11111111111111111111111111111111111111112']  // BONK -> WSOL
+    ['So11111111111111111111111111111111111111112', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'],
+    ['EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'So11111111111111111111111111111111111111112'],
+    ['So11111111111111111111111111111111111111112', 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN'],
+    ['JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', 'So11111111111111111111111111111111111111112'],
+    ['So11111111111111111111111111111111111111112', 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'],
+    ['DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', 'So11111111111111111111111111111111111111112']
   ];
 
   let bestOpportunity = null;
@@ -35,20 +33,21 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   for (const [inputMint, outputMint] of pairs) {
     try {
-      const quoteData = await jupiterApi.quoteGet({
-        inputMint,
-        outputMint,
-        amount: Number(tradeAmount),
-        slippageBps: 50,
-        onlyDirectRoutes: false
-      });
+      const url = `https://quote-api.jup.ag/v6/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${tradeAmount}&slippageBps=50&onlyDirectRoutes=false`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        console.log(`Quote HTTP error ${res.status} for pair ${inputMint} -> ${outputMint}`);
+        await sleep(500);
+        continue;
+      }
+      const quoteData = await res.json();
 
       if (quoteData && quoteData.outAmount && quoteData.inAmount) {
         const inAmt = BigInt(quoteData.inAmount);
         const outAmt = BigInt(quoteData.outAmount);
         const estimatedProfit = outAmt > inAmt ? Number(outAmt - inAmt) : 0;
 
-        console.log(`Checked pair | Estimated Profit: ${estimatedProfit} lamports`);
+        console.log(`Checked pair ${inputMint.slice(0, 6)}... -> ${outputMint.slice(0, 6)}... | Profit: ${estimatedProfit} lamports`);
 
         if (estimatedProfit > maxProfit) {
           maxProfit = estimatedProfit;
@@ -56,13 +55,13 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
         }
       }
     } catch (err) {
-      console.log(`Quote skipped due to routing response error.`);
+      console.log(`Quote fetch exception: ${err.message}`);
     }
     await sleep(400);
   }
 
   if (!bestOpportunity || bestOpportunity.estimatedProfit < minProfitThreshold) {
-    console.log(`Scan completed. Max net profit found (${maxProfit} lamports) did not meet threshold (${minProfitThreshold}). Aborting cleanly.`);
+    console.log(`Scan completed. Max profit found (${maxProfit} lamports) below threshold (${minProfitThreshold}). Exiting cleanly.`);
     process.exit(0);
   }
 
@@ -70,17 +69,24 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   let instructionsData;
   try {
-    instructionsData = await jupiterApi.swapInstructionsPost({
-      swapRequest: {
+    const swapRes = await fetch('https://quote-api.jup.ag/v6/swap-instructions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         quoteResponse: bestOpportunity.quoteData,
         userPublicKey: wallet.publicKey.toString(),
         wrapAndUnwrapSol: false,
         useSharedAccounts: false
-      }
+      })
     });
+    if (!swapRes.ok) {
+      const errText = await swapRes.text();
+      throw new Error(`Swap instructions API error ${swapRes.status}: ${errText}`);
+    }
+    instructionsData = await swapRes.json();
   } catch (e) {
-    console.log(`Instructions fetch failed: ${e.message}`);
-    process.exit(0);
+    console.error(`Instructions fetch failed: ${e.message}`);
+    process.exit(1);
   }
 
   const parseInstruction = (ix) => ({
@@ -122,8 +128,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     });
     console.log(`Arbitrage transaction broadcasted: https://solscan.io/tx/${txid}`);
   } catch (err) {
-    console.log(`Execution failed on-chain: ${err.message}`);
-    process.exit(0);
+    console.error(`Execution failed on-chain: ${err.message}`);
+    process.exit(1);
   }
 })().catch((err) => {
   console.error(`Fatal script error: ${err.stack || err.message}`);
