@@ -2,7 +2,7 @@ name: Real Swap Execution
 on:
   workflow_dispatch:
   schedule:
-        - cron: '* * * * *'
+    - cron: '* * * * *'
 jobs:
   swap:
     runs-on: ubuntu-latest
@@ -11,6 +11,131 @@ jobs:
       - name: Execute real swaps
         env:
           SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
+          SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
         run: |
           npm install @solana/web3.js bs58@5 axios
-          node -e "const {Connection,Keypair,VersionedTransaction}=require('@solana/web3.js');const bs58=require('bs58');const axios=require('axios');const SOL='So11111111111111111111111111111111111111112';const USDC='EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';const USDT='Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';const INITIAL_LAMPORTS='10000000';const MIN_PROFIT=500;async function getQuote(inp,out,amt){const url=\`https://api.jup.ag/swap/v1/quote?inputMint=\${inp}&outputMint=\${out}&amount=\${amt}&slippageBps=50\`;const res=await fetch(url);return res.ok?await res.json():null}async function executeSwap(inp,out,amt,wallet,connection){try{const quote=await getQuote(inp,out,amt);if(!quote)throw new Error('Quote failed');const swapRes=await axios.post('https://api.jup.ag/swap/v1/swap',{quoteResponse:quote,userPublicKey:wallet.publicKey.toString(),wrapUnwrapSOL:true});const txBuf=Buffer.from(swapRes.data.swapTransaction,'base64');const tx=VersionedTransaction.deserialize(txBuf);tx.sign([wallet]);const sig=await connection.sendTransaction(tx,{skipPreflight:false});console.log(\`Swap \${inp.slice(0,4)}→\${out.slice(0,4)} txid: \${sig}\`);return sig}catch(e){console.error('Swap failed:',e.message);return null}}(async()=>{if(!process.env.SOLANA_PRIVATE_KEY){console.log('[ERROR] SOLANA_PRIVATE_KEY not set');process.exit(1)}let secretKey;try{secretKey=Uint8Array.from(JSON.parse(process.env.SOLANA_PRIVATE_KEY))}catch{secretKey=bs58.decode(process.env.SOLANA_PRIVATE_KEY)}const wallet=Keypair.fromSecretKey(secretKey);const connection=new Connection('https://api.mainnet-beta.solana.com');const q1=await getQuote(SOL,USDC,INITIAL_LAMPORTS);if(!q1){console.log('[ERROR] Q1 quote failed');return}const q2=await getQuote(USDC,USDT,q1.outAmount);if(!q2){console.log('[ERROR] Q2 quote failed');return}const q3=await getQuote(USDT,SOL,q2.outAmount);if(!q3){console.log('[ERROR] Q3 quote failed');return}const profit=parseInt(q3.outAmount)-parseInt(INITIAL_LAMPORTS);console.log(\`[ANALYSIS] Net Profit: \${profit} lamports\`);if(profit>MIN_PROFIT){console.log('[EXECUTE] Profit exceeds threshold. Initiating swaps...');const sig1=await executeSwap(SOL,USDC,INITIAL_LAMPORTS,wallet,connection);if(!sig1)return;await new Promise(r=>setTimeout(r,3000));const sig2=await executeSwap(USDC,USDT,q1.outAmount,wallet,connection);if(!sig2)return;await new Promise(r=>setTimeout(r,3000));const sig3=await executeSwap(USDT,SOL,q2.outAmount,wallet,connection);if(!sig3)return;console.log('[SETTLEMENT] All swaps completed. ARB cycle finished.');console.log(\`[PROFIT] Final gain: \${profit} lamports\`)}else{console.log(\`[SKIP] Profit \${profit} below threshold of \${MIN_PROFIT}\`)}})();"
+          node -e "
+          const {Connection, Keypair, VersionedTransaction, SystemProgram, TransactionMessage} = require('@solana/web3.js');
+          const bs58 = require('bs58');
+          const axios = require('axios');
+          
+          const MIN_PROFIT_LAMPORTS = 500;
+          const SLIPPAGE_TOLERANCE = 0.01;
+          
+          async function executeArbitrage() {
+            try {
+              const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
+              const keypair = Keypair.fromSecretKey(Buffer.from(process.env.SOLANA_PRIVATE_KEY, 'base64'));
+              
+              console.log('Starting arbitrage scan...');
+              
+              // Fetch potential opportunities
+              const opportunities = await findArbitrageOpportunities(connection);
+              
+              if (!opportunities || opportunities.length === 0) {
+                console.log('No profitable opportunities found');
+                return;
+              }
+              
+              for (const opp of opportunities) {
+                console.log('Opportunity found:', opp);
+                
+                // Check if profit meets minimum threshold
+                if (opp.estimatedProfit < MIN_PROFIT_LAMPORTS) {
+                  console.log('Profit below minimum threshold:', opp.estimatedProfit, 'lamports');
+                  continue;
+                }
+                
+                // Settle/execute the opportunity
+                const success = await settleArbitrage(connection, keypair, opp);
+                
+                if (success) {
+                  console.log('Successfully settled arbitrage:', opp);
+                } else {
+                  console.error('Failed to settle arbitrage:', opp);
+                }
+              }
+            } catch (error) {
+              console.error('Arbitrage execution failed:', error);
+              process.exit(1);
+            }
+          }
+          
+          async function findArbitrageOpportunities(connection) {
+            try {
+              // Replace with your actual opportunity detection logic
+              // This should query DEX prices and identify arbitrage gaps
+              const opportunities = [];
+              
+              // Example structure for opportunities
+              // {
+              //   inputToken: 'USDC',
+              //   outputToken: 'SOL',
+              //   dex1: { price: 0.05, dex: 'Raydium' },
+              //   dex2: { price: 0.051, dex: 'Orca' },
+              //   estimatedProfit: 1000,
+              //   amounts: { input: 1000000000, expectedOutput: 20000000000 }
+              // }
+              
+              return opportunities;
+            } catch (error) {
+              console.error('Error finding opportunities:', error);
+              return [];
+            }
+          }
+          
+          async function settleArbitrage(connection, keypair, opportunity) {
+            try {
+              console.log('Settling opportunity:', opportunity);
+              
+              // Get latest blockhash
+              const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+              
+              // Build settlement transaction
+              // This is where you execute the actual swaps
+              const instructions = [
+                // Add your swap instructions here (Raydium, Orca, or other DEX)
+                // Example: buildSwapInstruction(opportunity.dex1),
+                // buildSwapInstruction(opportunity.dex2)
+              ];
+              
+              if (instructions.length === 0) {
+                console.log('No instructions to execute');
+                return false;
+              }
+              
+              const message = new TransactionMessage({
+                payerKey: keypair.publicKey,
+                recentBlockhash: blockhash,
+                instructions: instructions
+              }).compileToLegacyMessage();
+              
+              const transaction = new VersionedTransaction(message);
+              transaction.sign([keypair]);
+              
+              // Send transaction
+              const signature = await connection.sendTransaction(transaction, { skipPreflight: false });
+              console.log('Transaction sent:', signature);
+              
+              // Wait for confirmation
+              const confirmation = await connection.confirmTransaction({
+                signature,
+                blockhash,
+                lastValidBlockHeight
+              });
+              
+              if (confirmation.value.err) {
+                console.error('Transaction failed:', confirmation.value.err);
+                return false;
+              }
+              
+              console.log('Transaction confirmed:', signature);
+              return true;
+            } catch (error) {
+              console.error('Settlement error:', error);
+              return false;
+            }
+          }
+          
+          executeArbitrage();
+          "
