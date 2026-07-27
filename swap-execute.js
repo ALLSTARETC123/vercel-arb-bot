@@ -26,7 +26,7 @@ function parsePrivateKey(key) {
   }
 }
 
-const connection = new Connection(RPC_URL, 'confirmed');
+const connection = new Connection(RPC_URL, { commitment: 'confirmed' });
 let wallet;
 try {
   const secretKey = parsePrivateKey(PRIVATE_KEY);
@@ -59,6 +59,23 @@ async function getRoundTripQuote() {
   return { quote: leg1, netProfit };
 }
 
+async function confirmTransactionHTTP(txid, timeoutMs = 45000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const status = await connection.getSignatureStatus(txid);
+    if (status && status.value) {
+      if (status.value.err) {
+        throw new Error(`Transaction failed on-chain: ${JSON.stringify(status.value.err)}`);
+      }
+      if (status.value.confirmationStatus === 'confirmed' || status.value.confirmationStatus === 'finalized') {
+        return status.value;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  throw new Error(`Confirmation timeout (${timeoutMs}ms) for signature: ${txid}`);
+}
+
 async function executeSwap(quoteResponse) {
   const res = await fetch('https://api.jup.ag/swap/v1/swap', {
     method: 'POST',
@@ -88,12 +105,7 @@ async function executeSwap(quoteResponse) {
     maxRetries: 2
   });
 
-  const latestBlockHash = await connection.getLatestBlockhash();
-  await connection.confirmTransaction({
-    blockhash: latestBlockHash.blockhash,
-    lastValidBlockHeight: latestBlockHash.lastValidBlockHeight,
-    signature: txid
-  });
+  await confirmTransactionHTTP(txid);
   return txid;
 }
 
