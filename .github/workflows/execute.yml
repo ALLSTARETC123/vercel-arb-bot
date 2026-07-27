@@ -8,10 +8,12 @@ env:
 jobs:
   swap:
     runs-on: ubuntu-latest
+    env:
+      SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
     steps:
       - uses: actions/checkout@v3
       - run: npm install @solana/web3.js bs58@5 --no-cache
+      - name: Debug secret presence
+        run: node -e "console.log(process.env.SOLANA_PRIVATE_KEY ? 'SECRET_OK len='+process.env.SOLANA_PRIVATE_KEY.length : 'SECRET_MISSING')"
       - name: Execute swaps and settle profits
-        env:
-          SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
         run: node swap-execute.js 2>&1
