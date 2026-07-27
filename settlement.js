@@ -1,5 +1,5 @@
 const { Connection, Keypair, SystemProgram, sendAndConfirmTransaction, PublicKey } = require('@solana/web3.js');
-const bs58 = require('bs58');
+const bs58 = (require("bs58").default || require("bs58"));
 
 const SETTLEMENT_WALLET = "3jDHtWFGUtiqpiJ72tnmoNj5b2HFBGBf8hzR3bdhuPNm";
 const TX_FEE = 5000; // base Solana tx fee

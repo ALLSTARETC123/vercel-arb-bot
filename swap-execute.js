@@ -1,5 +1,5 @@
 const { Connection, Keypair, VersionedTransaction, SystemProgram, PublicKey } = require('@solana/web3.js');
-const bs58 = require('bs58');
+const bs58 = (require("bs58").default || require("bs58"));
 
 const SOL = "So11111111111111111111111111111111111111112";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
