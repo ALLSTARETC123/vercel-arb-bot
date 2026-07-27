@@ -1,27 +1,29 @@
 name: Solana Arbitrage Engine
 
 on:
-  schedule:
-    - cron: '*/5 * * * *'
   workflow_dispatch:
-
-concurrency:
-  group: solana-arbitrage
-  cancel-in-progress: true
-
-permissions:
-  actions: write
-  contents: read
 
 jobs:
   run-arb:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: npm ci
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Check Wallet Balances
+        env:
+          SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+          DESTINATION_WALLET: ${{ secrets.DESTINATION_WALLET }}
+        run: node check-balance.js
+
       - name: Execute Scan Engine
         env:
           SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
