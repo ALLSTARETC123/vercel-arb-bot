@@ -1,4 +1,5 @@
 import { Connection, Keypair, VersionedTransaction } from '@solana/web3.js';
+import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import bs58 from 'bs58';
 
 async function executeSwap() {
@@ -6,89 +7,76 @@ async function executeSwap() {
   const privateKey = process.env.SOLANA_PRIVATE_KEY;
   const inputMint = process.env.INPUT_MINT;
   const outputMint = process.env.OUTPUT_MINT;
-  const amount = process.env.TRADE_AMOUNT;
+  const tradeAmount = process.env.TRADE_AMOUNT;
 
-  if (!rpcUrl || !privateKey || !inputMint || !outputMint || !amount) {
-    console.error('Missing required environment variables.');
+  if (!rpcUrl || !privateKey || !inputMint || !outputMint || !tradeAmount) {
+    console.error('Missing required environment configuration.');
     process.exit(1);
   }
 
   const connection = new Connection(rpcUrl, 'confirmed');
   const wallet = Keypair.fromSecretKey(bs58.decode(privateKey));
 
-  const endpoints = [
-    'https://api.jup.ag/swap/v1',
-    'https://quote-api.jup.ag/v6'
-  ];
+  const balance = await connection.getBalance(wallet.publicKey);
+  const RENT_EXEMPTION_LAMPORTS = 2039280;
 
-  let quoteData = null;
-  let activeEndpoint = '';
+  const parsedAccounts = await connection.getParsedTokenAccountsByOwner(
+    wallet.publicKey,
+    { programId: TOKEN_PROGRAM_ID }
+  );
 
-  for (const endpoint of endpoints) {
-    try {
-      const quoteUrl = `${endpoint}/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amount}&slippageBps=100`;
-      const res = await fetch(quoteUrl);
-      if (res.ok) {
-        quoteData = await res.json();
-        activeEndpoint = endpoint;
-        break;
-      }
-    } catch (err) {
-      console.warn(`[WARN] Endpoint ${endpoint} unreachable: ${err.message}`);
-    }
+  const openAccounts = new Set([
+    'So11111111111111111111111111111111111111112'
+  ]);
+
+  for (const acc of parsedAccounts.value) {
+    openAccounts.add(acc.account.data.parsed.info.mint);
   }
 
-  if (!quoteData) {
-    console.log('[SWAP ENGINE] Jupiter endpoints unavailable during this run. Exiting safely.');
+  if (!openAccounts.has(outputMint) && balance < RENT_EXEMPTION_LAMPORTS) {
+    console.log(`Bypassing execution: Target ATA is not initialized and balance (${balance} lamports) cannot cover the ${RENT_EXEMPTION_LAMPORTS} rent fee.`);
     process.exit(0);
   }
 
-  try {
-    const swapRes = await fetch(`${activeEndpoint}/swap`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        quoteResponse: quoteData,
-        userPublicKey: wallet.publicKey.toString(),
-        wrapAndUnwrapSol: true,
-        dynamicComputeUnitLimit: true,
-        prioritizationFeeLamports: 'auto'
-      })
-    });
+  const quoteUrl = `https://quote-api.jup.ag/v6/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${tradeAmount}&slippageBps=50&onlyDirectRoutes=true`;
+  const quoteResponse = await fetch(quoteUrl);
+  const quoteData = await quoteResponse.json();
 
-    if (!swapRes.ok) {
-      console.log(`[SWAP ENGINE] Swap transaction construction returned status ${swapRes.status}`);
-      process.exit(0);
-    }
-
-    const { swapTransaction } = await swapRes.json();
-    const swapBuf = Buffer.from(swapTransaction, 'base64');
-    const transaction = VersionedTransaction.deserialize(swapBuf);
-
-    transaction.sign([wallet]);
-
-    const rawTx = transaction.serialize();
-    const txid = await connection.sendRawTransaction(rawTx, {
-      skipPreflight: false,
-      maxRetries: 3
-    });
-
-    console.log(`[SWAP ENGINE] Submitted transaction: ${txid}`);
-    const confirmation = await connection.confirmTransaction(txid, 'confirmed');
-
-    if (confirmation.value.err) {
-      console.log(`[SWAP ENGINE] Transaction reverted on-chain: ${JSON.stringify(confirmation.value.err)}`);
-      process.exit(0);
-    }
-
-    console.log(`[SWAP SUCCESS] Transaction landed: https://solscan.io/tx/${txid}`);
-  } catch (err) {
-    console.log(`[SWAP ENGINE] Execution bypassed: ${err.message}`);
+  if (!quoteData || quoteData.error) {
+    console.log('No direct swap route available.');
     process.exit(0);
   }
+
+  const swapResponse = await fetch('https://quote-api.jup.ag/v6/swap', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      quoteResponse: quoteData,
+      userPublicKey: wallet.publicKey.toString(),
+      wrapAndUnwrapSol: true,
+      dynamicComputeUnitLimit: true,
+      prioritizationFeeLamports: 'auto'
+    })
+  });
+
+  const swapData = await swapResponse.json();
+  if (!swapData.swapTransaction) {
+    console.error('Failed to assemble transaction.');
+    process.exit(1);
+  }
+
+  const transaction = VersionedTransaction.deserialize(Buffer.from(swapData.swapTransaction, 'base64'));
+  transaction.sign([wallet]);
+
+  const txid = await connection.sendRawTransaction(transaction.serialize(), {
+    skipPreflight: false,
+    maxRetries: 2
+  });
+
+  console.log(`Transaction sent: https://solscan.io/tx/${txid}`);
 }
 
 executeSwap().catch((err) => {
-  console.log(`[SWAP ENGINE] Handled execution exception: ${err.message}`);
-  process.exit(0);
+  console.error(`Swap error: ${err.message}`);
+  process.exit(1);
 });
