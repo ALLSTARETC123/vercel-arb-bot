@@ -2,7 +2,8 @@ name: Solana Arbitrage Engine
 
 on:
   workflow_dispatch:
-
+  schedule:
+    - cron: '*/5 * * * *'
 jobs:
   run-arb:
     runs-on: ubuntu-latest
