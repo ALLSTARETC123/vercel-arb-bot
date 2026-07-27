@@ -1,4 +1,4 @@
-const { Connection, Keypair, PublicKey, Transaction, SystemProgram } = require("@solana/web3.js");
+const { Connection, Keypair, PublicKey, Transaction, SystemProgram, VersionedTransaction, TransactionMessage } = require("@solana/web3.js");
 const bs58Import = require("bs58");
 const bs58 = bs58Import.default || bs58Import;
 
@@ -30,22 +30,28 @@ function parsePrivateKey(rawKey) {
 }
 
 async function sendAndConfirmHttp(connection, transaction, signers) {
-  const txid = await connection.sendTransaction(transaction, signers, { skipPreflight: false });
-  const start = Date.now();
-  while (Date.now() - start < 45000) {
-    const { value } = await connection.getSignatureStatus(txid);
-    if (value && (value.confirmationStatus === "confirmed" || value.confirmationStatus === "finalized")) {
-      if (value.err) throw new Error("Transaction execution failed: " + JSON.stringify(value.err));
-      return txid;
+  try {
+    const serialized = transaction.serialize();
+    const txid = await connection.sendRawTransaction(serialized, { skipPreflight: false });
+    const start = Date.now();
+    while (Date.now() - start < 45000) {
+      const { value } = await connection.getSignatureStatus(txid);
+      if (value && (value.confirmationStatus === "confirmed" || value.confirmationStatus === "finalized")) {
+        if (value.err) throw new Error("Transaction execution failed: " + JSON.stringify(value.err));
+        return txid;
+      }
+      await new Promise((r) => setTimeout(r, 1500));
     }
-    await new Promise((r) => setTimeout(r, 1500));
+    throw new Error("Transaction confirmation timed out for TX: " + txid);
+  } catch (err) {
+    console.error("[Settlement] sendAndConfirmHttp error:", err.message);
+    throw err;
   }
-  throw new Error("Transaction confirmation timed out for TX: " + txid);
 }
 
 async function runSettlement() {
   const rpcUrl = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
-  const connection = new Connection(rpcUrl, { commitment: "confirmed", wsEndpoint: "" });
+  const connection = new Connection(rpcUrl, { commitment: "confirmed" });
   const keypair = parsePrivateKey(process.env.SOLANA_PRIVATE_KEY);
   const recipientPubkey = new PublicKey(process.env.DESTINATION_WALLET || "3jDHtWFGUtiqpiJ72tnmoNj5b2HFBGBf8hzR3bdhuPNm");
 
@@ -64,16 +70,30 @@ async function runSettlement() {
   const sweepAmount = netExcess - ESTIMATED_TX_FEE;
   console.log("[Settlement] Sweeping " + sweepAmount + " lamports profit to " + recipientPubkey.toBase58() + " while retaining " + BASE_OPERATIONAL_RESERVE + " lamports reserve.");
 
-  const transaction = new Transaction().add(
-    SystemProgram.transfer({
+  try {
+    const { blockhash } = await connection.getLatestBlockhash();
+    
+    const instruction = SystemProgram.transfer({
       fromPubkey: keypair.publicKey,
       toPubkey: recipientPubkey,
       lamports: sweepAmount,
-    })
-  );
+    });
 
-  const txid = await sendAndConfirmHttp(connection, transaction, [keypair]);
-  console.log("[Settlement SUCCESS] Transferred " + sweepAmount + " lamports via HTTP polling. TXID: " + txid);
+    const messageV0 = new TransactionMessage({
+      payerKey: keypair.publicKey,
+      recentBlockhash: blockhash,
+      instructions: [instruction],
+    }).compileToV0Message();
+
+    const tx = new VersionedTransaction(messageV0);
+    tx.sign([keypair]);
+
+    const txid = await sendAndConfirmHttp(connection, tx, [keypair]);
+    console.log("[Settlement SUCCESS] Transferred " + sweepAmount + " lamports via HTTP polling. TXID: " + txid);
+  } catch (err) {
+    console.error("[Settlement] Error during settlement:", err.message);
+    throw err;
+  }
 }
 
 runSettlement().catch((err) => {
