@@ -2,7 +2,7 @@ name: Real Swap Execution
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/3 * * * *'
+        - cron: '* * * * *'
 jobs:
   swap:
     runs-on: ubuntu-latest
