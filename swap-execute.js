@@ -1,4 +1,5 @@
 import { Connection, Keypair, VersionedTransaction, TransactionMessage, PublicKey } from '@solana/web3.js';
+import { createJupiterApiClient } from '@jup-ag/api';
 import bs58 from 'bs58';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -25,6 +26,7 @@ const TOKEN_DECIMALS = {
 
   const connection = new Connection(rpcUrl, 'confirmed');
   const wallet = Keypair.fromSecretKey(bs58.decode(privateKey));
+  const jupiterApi = createJupiterApiClient();
 
   const pairs = [
     ['So11111111111111111111111111111111111111112', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'],
@@ -35,12 +37,6 @@ const TOKEN_DECIMALS = {
     ['DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', 'So11111111111111111111111111111111111111112']
   ];
 
-  const requestHeaders = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    'Accept': 'application/json',
-    'Connection': 'keep-alive'
-  };
-
   let bestOpportunity = null;
   let maxProfit = 0;
 
@@ -49,21 +45,13 @@ const TOKEN_DECIMALS = {
       const inputDecimals = TOKEN_DECIMALS[inputMint] || 9;
       const scaledAmount = Math.floor(baseTradeAmount * Math.pow(10, inputDecimals - 9));
 
-      const url = `https://quote-api.jup.ag/v6/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${scaledAmount}&slippageBps=50&onlyDirectRoutes=false`;
-      
-      const res = await fetch(url, { 
-        headers: requestHeaders,
-        signal: AbortSignal.timeout(8000)
+      const quoteData = await jupiterApi.quoteGet({
+        inputMint,
+        outputMint,
+        amount: scaledAmount,
+        slippageBps: 50,
+        onlyDirectRoutes: false
       });
-      
-      if (!res.ok) {
-        const errBody = await res.text();
-        console.log(`API error status ${res.status} for pair ${inputMint.slice(0, 4)} -> ${outputMint.slice(0, 4)}: ${errBody}`);
-        await sleep(600);
-        continue;
-      }
-      
-      const quoteData = await res.json();
 
       if (quoteData && quoteData.outAmount && quoteData.inAmount) {
         const inAmt = BigInt(quoteData.inAmount);
@@ -90,26 +78,14 @@ const TOKEN_DECIMALS = {
 
   console.log(`Profitable opportunity locked! Executing swap for estimated profit of ${bestOpportunity.estimatedProfit} lamports.`);
 
-  const swapRes = await fetch('https://quote-api.jup.ag/v6/swap-instructions', {
-    method: 'POST',
-    headers: {
-      ...requestHeaders,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
+  const instructionsData = await jupiterApi.swapInstructionsPost({
+    swapRequest: {
       quoteResponse: bestOpportunity.quoteData,
       userPublicKey: wallet.publicKey.toString(),
       wrapAndUnwrapSol: false,
       useSharedAccounts: false
-    })
+    }
   });
-
-  if (!swapRes.ok) {
-    const errText = await swapRes.text();
-    throw new Error(`Swap instructions generation failed: ${errText}`);
-  }
-
-  const instructionsData = await swapRes.json();
 
   const parseInstruction = (ix) => ({
     programId: new PublicKey(ix.programId),
