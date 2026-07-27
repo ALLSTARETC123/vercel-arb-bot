@@ -1,0 +1,51 @@
+name: Solana Arbitrage & Settlement Engine
+
+on:
+  schedule:
+    - cron: '*/1 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run-arb:
+    runs-on: ubuntu-latest
+    env:
+      SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
+      SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Restore Solana Keypair
+        run: |
+          mkdir -p ~/.config/solana
+          node -e '
+          const bs58 = require("bs58");
+          const fs = require("fs");
+          let secret = process.env.SOLANA_PRIVATE_KEY.trim();
+
+          if (!secret.startsWith("[") && !/^[1-9A-HJ-NP-Za-km-z]{80,90}$/.test(secret)) {
+            secret = Buffer.from(secret, "base64").toString("utf8").trim();
+          }
+
+          if (secret.startsWith("[")) {
+            fs.writeFileSync(process.env.HOME + "/.config/solana/id.json", secret);
+          } else {
+            const bytes = bs58.decode(secret);
+            fs.writeFileSync(process.env.HOME + "/.config/solana/id.json", JSON.stringify(Array.from(bytes)));
+          }
+          '
+          chmod 600 ~/.config/solana/id.json
+
+      - name: Execute Arbitrage & Settlement
+        run: |
+          node swap-execute.js
+          node settlement.js
