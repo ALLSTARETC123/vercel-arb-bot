@@ -36,7 +36,7 @@ async function executeSwap() {
   const inputMint = process.env.INPUT_MINT || wsolMint;
   const outputMint = process.env.OUTPUT_MINT || wsolMint;
 
-  const quoteUrl = `https://quote-api.jup.ag/v6/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${tradeAmount}&slippageBps=50`;
+  const quoteUrl = `https://api.jup.ag/swap/v1/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${tradeAmount}&slippageBps=50`;
 
   let quoteData;
   try {
@@ -59,7 +59,7 @@ async function executeSwap() {
 
   let swapData;
   try {
-    const swapResponse = await fetchWithRetry('https://quote-api.jup.ag/v6/swap', {
+    const swapResponse = await fetchWithRetry('https://api.jup.ag/swap/v1/swap', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
