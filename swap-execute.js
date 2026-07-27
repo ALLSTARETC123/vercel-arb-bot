@@ -68,6 +68,7 @@ async function executeSwap() {
         wrapAndUnwrapSol: false,
         useSharedAccounts: false,
         directAccountOnly: true,
+        skipUserAccountsRpcCalls: true,
         dynamicComputeUnitLimit: true,
         prioritizationFeeLamports: 'auto'
       })
