@@ -34,7 +34,9 @@ async function executeSwap() {
   }
 
   if (!openAccounts.has(outputMint) && balance < RENT_EXEMPTION_LAMPORTS) {
-    console.log(`Bypassing execution: Target ATA is not initialized and balance (${balance} lamports) cannot cover the ${RENT_EXEMPTION_LAMPORTS} rent fee.`);
+    console.log(`Bypassing execution: Target ATA (${outputMint}) is uninitialized and wallet balance (${balance} lamports) cannot cover the ${RENT_EXEMPTION_LAMPORTS} rent fee.`);
+    console.log('Initialized mints available for zero-rent trading:');
+    openAccounts.forEach((mint) => console.log(` - ${mint}`));
     process.exit(0);
   }
 
