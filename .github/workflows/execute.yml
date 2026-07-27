@@ -2,7 +2,7 @@ name: Real Swap Execution
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/3 * * * *'
+    - cron: '*/1 * * * *'
 env:
   CACHE_BUST: ${{ github.run_id }}
 jobs:

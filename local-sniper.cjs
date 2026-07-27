@@ -8,7 +8,7 @@ const BONK = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263";
 const WIF = "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm";
 
 const INITIAL_LAMPORTS = "10000000"; 
-const MIN_PROFIT = 5200;
+const MIN_PROFIT = 500;
 const POLL_DELAY_MS = 2000;
 
 const ROUTES = [
