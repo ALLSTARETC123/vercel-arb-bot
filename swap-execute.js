@@ -3,9 +3,18 @@ const bs58 = require('bs58');
 
 const rpcUrl = process.env.SOLANA_RPC_URL;
 const privateKeyEnv = process.env.SOLANA_PRIVATE_KEY;
+const inputMint = process.env.INPUT_MINT;
+const outputMint = process.env.OUTPUT_MINT;
+const tradeAmount = process.env.TRADE_AMOUNT;
+const minProfitThreshold = Number(process.env.MIN_PROFIT_THRESHOLD || '0');
 
 if (!rpcUrl || !privateKeyEnv) {
-  console.error('[CONFIG ERROR] Missing SOLANA_RPC_URL or SOLANA_PRIVATE_KEY.');
+  console.error('[CONFIG ERROR] Missing SOLANA_RPC_URL or SOLANA_PRIVATE_KEY in environment.');
+  process.exit(1);
+}
+
+if (!inputMint || !outputMint || !tradeAmount) {
+  console.error('[CONFIG ERROR] Missing required parameters: INPUT_MINT, OUTPUT_MINT, or TRADE_AMOUNT.');
   process.exit(1);
 }
 
@@ -23,17 +32,12 @@ try {
 }
 
 if (secretKey.length !== 64) {
-  console.error(`[KEY ERROR] Invalid key size (${secretKey.length} bytes). Must be 64 bytes.`);
+  console.error(`[KEY ERROR] Invalid key size (${secretKey.length} bytes). Must be exactly 64 bytes.`);
   process.exit(1);
 }
 
 const connection = new Connection(rpcUrl, 'confirmed');
 const wallet = Keypair.fromSecretKey(secretKey);
-
-const inputMint = process.env.INPUT_MINT || 'So11111111111111111111111111111111111111112';
-const outputMint = process.env.OUTPUT_MINT || 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-const tradeAmount = process.env.TRADE_AMOUNT || '100000000';
-const minProfitThreshold = Number(process.env.MIN_PROFIT_THRESHOLD || '500');
 
 async function scanAndExecute() {
   try {
@@ -41,7 +45,7 @@ async function scanAndExecute() {
     const res = await fetch(url);
 
     if (!res.ok) {
-      console.error(`[API ERROR] Jupiter returned HTTP ${res.status}`);
+      console.error(`[API ERROR] Jupiter returned HTTP status ${res.status}`);
       return false;
     }
 
