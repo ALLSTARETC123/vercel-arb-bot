@@ -28,7 +28,8 @@ jobs:
         run: |
           mkdir -p ~/.config/solana
           node -e '
-          const bs58 = require("bs58");
+          const bs58Import = require("bs58");
+          const bs58 = bs58Import.default || bs58Import;
           const fs = require("fs");
           let secret = process.env.SOLANA_PRIVATE_KEY.trim();
 
