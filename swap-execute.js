@@ -1,5 +1,6 @@
 const { Connection, Keypair, VersionedTransaction } = require('@solana/web3.js');
-const bs58 = require('bs58');
+const bs58Module = require('bs58');
+const bs58 = bs58Module.default || bs58Module;
 
 const RPC_URL = process.env.SOLANA_RPC_URL;
 const PRIVATE_KEY = process.env.SOLANA_PRIVATE_KEY;
@@ -13,9 +14,27 @@ if (!RPC_URL || !PRIVATE_KEY || !INPUT_MINT || !OUTPUT_MINT || isNaN(TRADE_AMOUN
   process.exit(1);
 }
 
+function parsePrivateKey(key) {
+  try {
+    const trimmed = key.trim();
+    if (trimmed.startsWith('[')) {
+      return Uint8Array.from(JSON.parse(trimmed));
+    }
+    return bs58.decode(trimmed);
+  } catch (err) {
+    throw new Error(`Failed to parse SOLANA_PRIVATE_KEY: ${err.message}`);
+  }
+}
+
 const connection = new Connection(RPC_URL, 'confirmed');
-const secretKey = bs58.decode(PRIVATE_KEY);
-const wallet = Keypair.fromSecretKey(secretKey);
+let wallet;
+try {
+  const secretKey = parsePrivateKey(PRIVATE_KEY);
+  wallet = Keypair.fromSecretKey(secretKey);
+} catch (err) {
+  console.error(`[KEY ERROR] ${err.message}`);
+  process.exit(1);
+}
 
 async function fetchQuote(input, output, amount) {
   const url = `https://api.jup.ag/swap/v1/quote?inputMint=${input}&outputMint=${output}&amount=${amount}&slippageBps=50`;
