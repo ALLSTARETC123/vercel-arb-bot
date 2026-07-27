@@ -4,7 +4,7 @@ import bs58 from 'bs58';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 (async () => {
-  console.log('Production arbitrage execution engine initialized...');
+  console.log('Arbitrage scan and execution engine initialized...');
 
   const rpcUrl = process.env.SOLANA_RPC_URL;
   const privateKey = process.env.SOLANA_PRIVATE_KEY;
@@ -34,13 +34,14 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   };
 
   let bestOpportunity = null;
-  let maxProfit = 0;
+  let maxProfit = -Infinity;
 
   for (const [inputMint, outputMint] of pairs) {
     try {
       const url = `https://quote-api.jup.ag/v6/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${tradeAmount}&slippageBps=50&onlyDirectRoutes=false`;
       const res = await fetch(url, { headers: requestHeaders });
       if (!res.ok) {
+        console.log(`API response status ${res.status} for pair ${inputMint.slice(0, 4)} -> ${outputMint.slice(0, 4)}`);
         await sleep(400);
         continue;
       }
@@ -49,7 +50,9 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       if (quoteData && quoteData.outAmount && quoteData.inAmount) {
         const inAmt = BigInt(quoteData.inAmount);
         const outAmt = BigInt(quoteData.outAmount);
-        const estimatedProfit = outAmt > inAmt ? Number(outAmt - inAmt) : 0;
+        const estimatedProfit = Number(outAmt - inAmt);
+
+        console.log(`Evaluated pair ${inputMint.slice(0, 4)}... -> ${outputMint.slice(0, 4)}... | Net Spread: ${estimatedProfit} lamports`);
 
         if (estimatedProfit > maxProfit) {
           maxProfit = estimatedProfit;
@@ -57,17 +60,17 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
         }
       }
     } catch (err) {
-      // Silent catch for network drops during iteration
+      console.log(`Scan warning on pair: ${err.message}`);
     }
     await sleep(400);
   }
 
   if (!bestOpportunity || bestOpportunity.estimatedProfit < minProfitThreshold) {
-    console.log(`Scan completed. Max profit found (${maxProfit} lamports) did not meet threshold (${minProfitThreshold}). Exiting cleanly.`);
+    console.log(`Scan cycle finished. Highest observed spread was ${maxProfit} lamports, failing to clear threshold of ${minProfitThreshold} lamports.`);
     process.exit(0);
   }
 
-  console.log(`Profitable route secured. Estimated net profit: ${bestOpportunity.estimatedProfit} lamports.`);
+  console.log(`Profitable opportunity locked! Executing swap for estimated profit of ${bestOpportunity.estimatedProfit} lamports.`);
 
   const swapRes = await fetch('https://quote-api.jup.ag/v6/swap-instructions', {
     method: 'POST',
@@ -85,7 +88,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   if (!swapRes.ok) {
     const errText = await swapRes.text();
-    throw new Error(`Swap instructions endpoint returned error: ${errText}`);
+    throw new Error(`Swap instructions generation failed: ${errText}`);
   }
 
   const instructionsData = await swapRes.json();
