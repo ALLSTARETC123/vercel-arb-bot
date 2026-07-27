@@ -1,3 +1,5 @@
+const dns = require("dns");
+if (dns.setDefaultResultOrder) dns.setDefaultResultOrder("ipv4first");
 const { Connection, Keypair } = require('@solana/web3.js');
 const bs58 = require('bs58');
 
@@ -27,6 +29,8 @@ try {
     secretKey = (bs58.decode || bs58.default?.decode)(trimmedKey);
   }
 } catch (err) {
+  console.error(err.stack);
+  if (err.cause) console.error("CAUSE:", JSON.stringify(err.cause));
   console.error('[KEY ERROR] Failed to parse SOLANA_PRIVATE_KEY:', err.message);
   process.exit(1);
 }
@@ -67,6 +71,8 @@ async function scanAndExecute() {
     console.log(`[PROFIT OPPORTUNITY] Trade viable. Net profit: ${netProfit} lamports`);
     return true;
   } catch (error) {
+  console.error(error.stack);
+  if (error.cause) console.error("CAUSE:", JSON.stringify(error.cause));
     console.error('[EXECUTION ERROR]', error.message);
     return false;
   }
