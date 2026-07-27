@@ -4,11 +4,9 @@ import bs58 from 'bs58';
 async function executeSwap() {
   const rpcUrl = process.env.SOLANA_RPC_URL;
   const privateKey = process.env.SOLANA_PRIVATE_KEY;
-  const inputMint = process.env.INPUT_MINT;
-  const outputMint = process.env.OUTPUT_MINT;
   const tradeAmount = process.env.TRADE_AMOUNT;
 
-  if (!rpcUrl || !privateKey || !inputMint || !outputMint || !tradeAmount) {
+  if (!rpcUrl || !privateKey || !tradeAmount) {
     console.error('Missing required environment configuration.');
     process.exit(1);
   }
@@ -16,36 +14,21 @@ async function executeSwap() {
   const connection = new Connection(rpcUrl, 'confirmed');
   const wallet = Keypair.fromSecretKey(bs58.decode(privateKey));
 
-  const balance = await connection.getBalance(wallet.publicKey);
-  const RENT_EXEMPTION_LAMPORTS = 2039280;
-  const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+  const wsolMint = 'So11111111111111111111111111111111111111112';
+  const inputMint = process.env.INPUT_MINT || wsolMint;
+  const outputMint = process.env.OUTPUT_MINT || wsolMint;
 
-  const parsedAccounts = await connection.getParsedTokenAccountsByOwner(
-    wallet.publicKey,
-    { programId: TOKEN_PROGRAM_ID }
-  );
-
-  const openAccounts = new Set([
-    'So11111111111111111111111111111111111111112'
-  ]);
-
-  for (const acc of parsedAccounts.value) {
-    openAccounts.add(acc.account.data.parsed.info.mint);
-  }
-
-  if (!openAccounts.has(outputMint) && balance < RENT_EXEMPTION_LAMPORTS) {
-    console.log(`Bypassing execution: Target ATA is uninitialized and balance (${balance} lamports) cannot cover rent.`);
-    console.log('Initialized mints available for zero-rent trading (remove hyphens when copying):');
-    openAccounts.forEach((mint) => console.log(` - ${mint.split('').join('-')}`));
-    process.exit(0);
-  }
-
-  const quoteUrl = `https://quote-api.jup.ag/v6/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${tradeAmount}&slippageBps=50&onlyDirectRoutes=true`;
+  const quoteUrl = `https://quote-api.jup.ag/v6/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${tradeAmount}&slippageBps=50`;
   const quoteResponse = await fetch(quoteUrl);
   const quoteData = await quoteResponse.json();
 
-  if (!quoteData || quoteData.error) {
-    console.log('No direct swap route available.');
+  if (!quoteData || quoteData.error || !quoteData.outAmount) {
+    console.log('No valid swap route returned from quote API.');
+    process.exit(0);
+  }
+
+  if (inputMint === outputMint && BigInt(quoteData.outAmount) <= BigInt(tradeAmount)) {
+    console.log(`No profitable margin: input ${tradeAmount} lamports, output ${quoteData.outAmount} lamports.`);
     process.exit(0);
   }
 
@@ -63,7 +46,7 @@ async function executeSwap() {
 
   const swapData = await swapResponse.json();
   if (!swapData.swapTransaction) {
-    console.error('Failed to assemble transaction.');
+    console.error('Failed to assemble swap transaction.');
     process.exit(1);
   }
 
