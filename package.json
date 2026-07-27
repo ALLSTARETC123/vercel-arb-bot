@@ -1,0 +1,27 @@
+{
+  "name": "vercel-arb-bot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thgun2yerhed/vercel-arb-bot.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/thgun2yerhed/vercel-arb-bot/issues"
+  },
+  "homepage": "https://github.com/thgun2yerhed/vercel-arb-bot#readme",
+  "dependencies": {
+    "@solana/web3.js": "^1.98.4",
+    "bip39": "^3.1.0",
+    "bs58": "^6.0.0",
+    "jito-ts": "^4.2.1"
+  }
+}
