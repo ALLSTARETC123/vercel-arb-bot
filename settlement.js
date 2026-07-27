@@ -1,4 +1,4 @@
-const { Connection, Keypair, PublicKey, Transaction, SystemProgram, sendAndConfirmTransaction } = require("@solana/web3.js");
+const { Connection, Keypair, PublicKey, Transaction, SystemProgram } = require("@solana/web3.js");
 const bs58Import = require("bs58");
 const bs58 = bs58Import.default || bs58Import;
 
@@ -29,15 +29,29 @@ function parsePrivateKey(rawKey) {
   }
 }
 
+async function sendAndConfirmHttp(connection, transaction, signers) {
+  const txid = await connection.sendTransaction(transaction, signers, { skipPreflight: false });
+  const start = Date.now();
+  while (Date.now() - start < 45000) {
+    const { value } = await connection.getSignatureStatus(txid);
+    if (value && (value.confirmationStatus === "confirmed" || value.confirmationStatus === "finalized")) {
+      if (value.err) throw new Error("Transaction execution failed: " + JSON.stringify(value.err));
+      return txid;
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  throw new Error("Transaction confirmation timed out for TX: " + txid);
+}
+
 async function runSettlement() {
   const rpcUrl = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
-  const connection = new Connection(rpcUrl, "confirmed");
+  const connection = new Connection(rpcUrl, { commitment: "confirmed", wsEndpoint: "" });
   const keypair = parsePrivateKey(process.env.SOLANA_PRIVATE_KEY);
   const recipientPubkey = new PublicKey(process.env.DESTINATION_WALLET || "3jDHtWFGUtiqpiJ72tnmoNj5b2HFBGBf8hzR3bdhuPNm");
 
-  const BASE_OPERATIONAL_RESERVE = 2000000; // 0.002 SOL gas reserve
-  const MIN_PROFIT_THRESHOLD = 1000; // Minimum required profit in lamports
-  const ESTIMATED_TX_FEE = 5000; // Transaction fee for native transfer
+  const BASE_OPERATIONAL_RESERVE = 2000000;
+  const MIN_PROFIT_THRESHOLD = 1000;
+  const ESTIMATED_TX_FEE = 5000;
 
   const balance = await connection.getBalance(keypair.publicKey);
   const netExcess = balance - BASE_OPERATIONAL_RESERVE;
@@ -58,8 +72,8 @@ async function runSettlement() {
     })
   );
 
-  const txid = await sendAndConfirmTransaction(connection, transaction, [keypair]);
-  console.log("[Settlement SUCCESS] Transferred " + sweepAmount + " lamports. TXID: " + txid);
+  const txid = await sendAndConfirmHttp(connection, transaction, [keypair]);
+  console.log("[Settlement SUCCESS] Transferred " + sweepAmount + " lamports via HTTP polling. TXID: " + txid);
 }
 
 runSettlement().catch((err) => {

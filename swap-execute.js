@@ -96,7 +96,7 @@ async function settle(wallet, connection) {
       sk = bs58.decode(process.env.SOLANA_PRIVATE_KEY);
     }
     const wallet = Keypair.fromSecretKey(sk);
-    const connection = new Connection('https://api.mainnet-beta.solana.com');
+    const connection = new Connection('https://api.mainnet-beta.solana.com', { commitment: "confirmed", wsEndpoint: "" });
     
     const q1 = await getQuote(SOL, USDC, INIT);
     if (!q1) {
