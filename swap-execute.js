@@ -36,7 +36,7 @@ async function executeSwap() {
   const inputMint = process.env.INPUT_MINT || wsolMint;
   const outputMint = process.env.OUTPUT_MINT || wsolMint;
 
-  const quoteUrl = `https://api.jup.ag/swap/v1/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${tradeAmount}&slippageBps=50`;
+  const quoteUrl = `https://api.jup.ag/swap/v1/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${tradeAmount}&slippageBps=50&onlyDirectRoutes=true`;
 
   let quoteData;
   try {
@@ -48,7 +48,7 @@ async function executeSwap() {
   }
 
   if (!quoteData || quoteData.error || !quoteData.outAmount) {
-    console.log('No valid route returned.');
+    console.log('No direct route returned.');
     process.exit(0);
   }
 
