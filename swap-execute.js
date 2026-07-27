@@ -36,7 +36,7 @@ async function executeSwap() {
   const inputMint = process.env.INPUT_MINT || wsolMint;
   const outputMint = process.env.OUTPUT_MINT || wsolMint;
 
-  const quoteUrl = `https://api.jup.ag/swap/v1/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${tradeAmount}&slippageBps=50&onlyDirectRoutes=true`;
+  const quoteUrl = `https://api.jup.ag/swap/v1/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${tradeAmount}&slippageBps=50`;
 
   let quoteData;
   try {
@@ -66,7 +66,6 @@ async function executeSwap() {
         quoteResponse: quoteData,
         userPublicKey: wallet.publicKey.toString(),
         wrapAndUnwrapSol: true,
-        useSharedAccounts: true,
         dynamicComputeUnitLimit: true,
         prioritizationFeeLamports: 'auto'
       })
@@ -92,7 +91,7 @@ async function executeSwap() {
     });
     console.log(`Transaction sent: https://solscan.io/tx/${txid}`);
   } catch (err) {
-    console.log(`Execution skipped due to on-chain constraint: ${err.message}`);
+    console.log(`Execution failed on-chain: ${err.message}`);
     process.exit(0);
   }
 }
