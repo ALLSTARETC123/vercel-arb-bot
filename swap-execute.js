@@ -3,15 +3,22 @@ import bs58 from 'bs58';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const TOKEN_DECIMALS = {
+  'So11111111111111111111111111111111111111112': 9,
+  'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': 6,
+  'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN': 6,
+  'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263': 5
+};
+
 (async () => {
   console.log('Arbitrage scan and execution engine initialized...');
 
   const rpcUrl = process.env.SOLANA_RPC_URL;
   const privateKey = process.env.SOLANA_PRIVATE_KEY;
-  const tradeAmount = process.env.TRADE_AMOUNT;
+  const baseTradeAmount = Number(process.env.TRADE_AMOUNT);
   const minProfitThreshold = Number(process.env.MIN_PROFIT_THRESHOLD || 1000);
 
-  if (!rpcUrl || !privateKey || !tradeAmount) {
+  if (!rpcUrl || !privateKey || !baseTradeAmount) {
     console.error('Missing required environment configuration.');
     process.exit(1);
   }
@@ -34,17 +41,24 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   };
 
   let bestOpportunity = null;
-  let maxProfit = -Infinity;
+  let maxProfit = 0;
 
   for (const [inputMint, outputMint] of pairs) {
     try {
-      const url = `https://quote-api.jup.ag/v6/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${tradeAmount}&slippageBps=50&onlyDirectRoutes=false`;
+      const inputDecimals = TOKEN_DECIMALS[inputMint] || 9;
+      // Scale trade amount relative to input mint decimals
+      const scaledAmount = Math.floor(baseTradeAmount * Math.pow(10, inputDecimals - 9));
+
+      const url = `https://quote-api.jup.ag/v6/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${scaledAmount}&slippageBps=50&onlyDirectRoutes=false`;
       const res = await fetch(url, { headers: requestHeaders });
+      
       if (!res.ok) {
-        console.log(`API response status ${res.status} for pair ${inputMint.slice(0, 4)} -> ${outputMint.slice(0, 4)}`);
+        const errBody = await res.text();
+        console.log(`API error status ${res.status} for pair ${inputMint.slice(0, 4)} -> ${outputMint.slice(0, 4)}: ${errBody}`);
         await sleep(400);
         continue;
       }
+      
       const quoteData = await res.json();
 
       if (quoteData && quoteData.outAmount && quoteData.inAmount) {
