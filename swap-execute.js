@@ -3,11 +3,12 @@ import { createJupiterApiClient } from '@jup-ag/api';
 import bs58 from 'bs58';
 
 (async () => {
-  console.log('Engine started...');
+  console.log('Scan engine initiated...');
   
   const rpcUrl = process.env.SOLANA_RPC_URL;
   const privateKey = process.env.SOLANA_PRIVATE_KEY;
   const tradeAmount = process.env.TRADE_AMOUNT;
+  const minProfitThreshold = Number(process.env.MIN_PROFIT_THRESHOLD || 1000);
 
   if (!rpcUrl || !privateKey || !tradeAmount) {
     console.error('Missing required environment configuration.');
@@ -29,17 +30,30 @@ import bs58 from 'bs58';
       outputMint,
       amount: Number(tradeAmount),
       slippageBps: 50,
-      onlyDirectRoutes: true
+      onlyDirectRoutes: false
     });
   } catch (e) {
-    console.log(`Quote request failed: ${e.message}`);
+    console.log(`Quote scan failed: ${e.message}`);
     process.exit(0);
   }
 
-  if (!quoteData || !quoteData.outAmount) {
-    console.log('No direct route returned.');
+  if (!quoteData || !quoteData.outAmount || !quoteData.inAmount) {
+    console.log('No valid quote route returned by scan engine.');
     process.exit(0);
   }
+
+  const inAmt = BigInt(quoteData.inAmount);
+  const outAmt = BigInt(quoteData.outAmount);
+  const estimatedProfit = outAmt > inAmt ? Number(outAmt - inAmt) : 0;
+
+  console.log(`Scan result - Input: ${inAmt}, Output: ${outAmt}, Estimated Net: ${estimatedProfit} lamports (Threshold: ${minProfitThreshold})`);
+
+  if (estimatedProfit < minProfitThreshold) {
+    console.log('Profit threshold not met. Aborting execution.');
+    process.exit(0);
+  }
+
+  console.log('Profitable opportunity verified. Fetching instructions...');
 
   let instructionsData;
   try {
@@ -78,7 +92,7 @@ import bs58 from 'bs58';
     .filter((ix) => ix.programId !== ataProgramId)
     .map(parseInstruction);
 
-  console.log(`Instructions filtered: ${filteredInstructions.length} remain after stripping ATA creation.`);
+  console.log(`Instructions compiled: ${filteredInstructions.length} active instructions after stripping ATA creation.`);
 
   const { blockhash } = await connection.getLatestBlockhash('confirmed');
   const messageV0 = new TransactionMessage({
@@ -95,7 +109,7 @@ import bs58 from 'bs58';
       skipPreflight: true,
       maxRetries: 2
     });
-    console.log(`Transaction sent: https://solscan.io/tx/${txid}`);
+    console.log(`Arbitrage transaction broadcasted: https://solscan.io/tx/${txid}`);
   } catch (err) {
     console.log(`Execution failed on-chain: ${err.message}`);
     process.exit(0);
