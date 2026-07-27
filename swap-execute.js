@@ -42,7 +42,7 @@ const wallet = Keypair.fromSecretKey(secretKey);
 async function scanAndExecute() {
   try {
     const url = `https://quote-api.jup.ag/v6/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${tradeAmount}&slippageBps=50`;
-    const res = await fetch(url);
+    const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" } });
 
     if (!res.ok) {
       console.error(`[API ERROR] Jupiter returned HTTP status ${res.status}`);
