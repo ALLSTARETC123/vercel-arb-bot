@@ -12,7 +12,7 @@ concurrency:
 jobs:
   run-arb:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 3
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -26,30 +26,12 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Check Wallet Balances
-        env:
-          SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
-          SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
-          DESTINATION_WALLET: ${{ secrets.DESTINATION_WALLET }}
-        run: node check-balance.js
-
-      - name: Execute Scan Engine
+      - name: Execute Unified Pipeline
         env:
           SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
           SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
           DESTINATION_WALLET: ${{ secrets.DESTINATION_WALLET }}
-          INPUT_MINT: ${{ secrets.INPUT_MINT }}
-          OUTPUT_MINT: ${{ secrets.OUTPUT_MINT }}
           TRADE_AMOUNT: ${{ secrets.TRADE_AMOUNT }}
           MIN_PROFIT_THRESHOLD: ${{ secrets.MIN_PROFIT_THRESHOLD }}
-        run: node swap-execute.js
-
-      - name: Execute Profit Settlement
-        if: success()
-        env:
-          SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
-          SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
-          DESTINATION_WALLET: ${{ secrets.DESTINATION_WALLET }}
-          MIN_PROFIT_THRESHOLD: ${{ secrets.MIN_PROFIT_THRESHOLD }}
-        run: node settlement.js
+        run: node index.js
         
