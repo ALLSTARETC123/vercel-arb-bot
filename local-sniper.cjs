@@ -5,27 +5,24 @@ const SOL = "So11111111111111111111111111111111111111112";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 const BONK = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263";
-const WIF = "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm";
+const WIF = "EKpQGSJtjMFqKSJtanSqYXRcF8fBopzLHYxdM65zcjm";
 
-const INITIAL_LAMPORTS = "10000000"; 
-const MIN_PROFIT = 500;
-const POLL_DELAY_MS = 2000;
+const INITIAL_LAMPORTS = "100000000"; // 0.1 SOL base input
+const MIN_PROFIT_LAMPORTS = 50000;    // Minimum net threshold to cover signature and priority fees
+const POLL_DELAY_MS = 1000;
 
-const ROUTES = [
-  { name: "USDC-USDT", tokens: [USDC, USDT] },
-  { name: "USDC-BONK", tokens: [USDC, BONK] },
-  { name: "USDC-WIF", tokens: [USDC, WIF] }
-];
+const INTERMEDIATE_TARGETS = [USDC, USDT, BONK, WIF];
 
-async function getQuote(inp, out, amt) {
-  const url = `https://api.jup.ag/swap/v1/quote?inputMint=${inp}&outputMint=${out}&amount=${amt}&slippageBps=50`;
+async function fetchQuote(inputMint, outputMint, amount) {
+  const url = `https://api.jup.ag/swap/v1/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amount}&slippageBps=30&restrictIntermediateTokens=true`;
   const res = await fetch(url);
-  return res.ok ? await res.json() : null;
+  if (!res.ok) return null;
+  return await res.json();
 }
 
 (async () => {
   if (!process.env.SOLANA_PRIVATE_KEY) {
-    console.log("[Error] SOLANA_PRIVATE_KEY missing.");
+    console.error("[Error] SOLANA_PRIVATE_KEY environment variable required.");
     process.exit(1);
   }
 
@@ -37,46 +34,59 @@ async function getQuote(inp, out, amt) {
   }
 
   const wallet = Keypair.fromSecretKey(secretKey);
-  const connection = new Connection("https://api.mainnet-beta.solana.com");
+  const rpcEndpoint = process.env.SOLANA_RPC_URL || "https://solana-mainnet.g.alchemy.com/v2/hVK0JqgLbPGWwnqTt9DR6";
+  const connection = new Connection(rpcEndpoint, "confirmed");
 
-  console.log(`Starting High-Frequency Sniper on ${ROUTES.length} routes...`);
+  console.log(`Arbitrage execution engine active. Connected to Alchemy RPC endpoint...`);
 
   while (true) {
-    for (const route of ROUTES) {
+    for (const token of INTERMEDIATE_TARGETS) {
       try {
-        const q1 = await getQuote(SOL, route.tokens[0], INITIAL_LAMPORTS);
-        if (!q1) continue;
+        // Leg 1: SOL -> Intermediate Token
+        const leg1 = await fetchQuote(SOL, token, INITIAL_LAMPORTS);
+        if (!leg1 || !leg1.outAmount) continue;
 
-        const q2 = await getQuote(route.tokens[0], route.tokens[1], q1.outAmount);
-        if (!q2) continue;
+        // Leg 2: Intermediate Token -> SOL (Closed Loop Settlement)
+        const leg2 = await fetchQuote(token, SOL, leg1.outAmount);
+        if (!leg2 || !leg2.outAmount) continue;
 
-        const q3 = await getQuote(route.tokens[1], SOL, q2.outAmount);
-        if (!q3) continue;
+        const outLamports = BigInt(leg2.outAmount);
+        const inLamports = BigInt(INITIAL_LAMPORTS);
+        const netProfit = outLamports - inLamports;
 
-        const profit = parseInt(q3.outAmount) - parseInt(INITIAL_LAMPORTS);
-        
-        if (profit > MIN_PROFIT) {
-          const swapReq = await fetch('https://api.jup.ag/swap/v1/swap', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+        if (netProfit > BigInt(MIN_PROFIT_LAMPORTS)) {
+          console.log(`Arbitrage spread locked! Estimated net yield: ${netProfit.toString()} lamports`);
+
+          const swapRes = await fetch("https://api.jup.ag/swap/v1/swap", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              quoteResponse: q3,
+              quoteResponse: leg2,
               userPublicKey: wallet.publicKey.toString(),
               wrapAndUnwrapSol: true,
-              prioritizationFeeLamports: 100
+              dynamicComputeUnitLimit: true,
+              prioritizationFeeLamports: "auto"
             })
           });
 
-          const { swapTransaction } = await swapReq.json();
+          const { swapTransaction } = await swapRes.json();
           if (swapTransaction) {
-            const transaction = VersionedTransaction.deserialize(Buffer.from(swapTransaction, 'base64'));
+            const txBuffer = Buffer.from(swapTransaction, "base64");
+            const transaction = VersionedTransaction.deserialize(txBuffer);
             transaction.sign([wallet]);
-            const txid = await connection.sendRawTransaction(transaction.serialize());
-            console.log(`[SUCCESS] Transaction: ${txid}`);
+
+            const txid = await connection.sendRawTransaction(transaction.serialize(), {
+              skipPreflight: false,
+              maxRetries: 3
+            });
+            console.log(`[SUCCESS] Arbitrage transaction landed: https://solscan.io/tx/${txid}`);
           }
         }
-      } catch (err) {}
+      } catch (err) {
+        console.error(`Route scan execution error: ${err.message}`);
+      }
     }
-    await new Promise(resolve => setTimeout(resolve, POLL_DELAY_MS));
+    await new Promise((resolve) => setTimeout(resolve, POLL_DELAY_MS));
   }
 })();
+                              
