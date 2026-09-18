@@ -4,9 +4,15 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '*/5 * * * *'
+
+concurrency:
+  group: solana-arbitrage-engine
+  cancel-in-progress: false
+
 jobs:
   run-arb:
     runs-on: ubuntu-latest
+    timeout-minutes: 4
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -14,7 +20,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '20'
+          cache: 'npm'
 
       - name: Install Dependencies
         run: npm ci
@@ -36,3 +43,13 @@ jobs:
           TRADE_AMOUNT: ${{ secrets.TRADE_AMOUNT }}
           MIN_PROFIT_THRESHOLD: ${{ secrets.MIN_PROFIT_THRESHOLD }}
         run: node swap-execute.js
+
+      - name: Execute Profit Settlement
+        if: success()
+        env:
+          SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
+          SOLANA_RPC_URL: ${{ secrets.SOLANA_RPC_URL }}
+          DESTINATION_WALLET: ${{ secrets.DESTINATION_WALLET }}
+          MIN_PROFIT_THRESHOLD: ${{ secrets.MIN_PROFIT_THRESHOLD }}
+        run: node settlement.js
+        
