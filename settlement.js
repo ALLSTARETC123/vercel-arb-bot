@@ -1,5 +1,13 @@
-const { Connection, Keypair, PublicKey, Transaction, SystemProgram } = require("@solana/web3.js");
-const bs58Import = require("bs58");
+const { 
+  Connection, 
+  Keypair, 
+  PublicKey, 
+  VersionedTransaction, 
+  TransactionMessage, 
+  SystemProgram,
+  ComputeBudgetProgram
+} = require('@solana/web3.js');
+const bs58Import = require('bs58');
 const bs58 = bs58Import.default || bs58Import;
 
 function parsePrivateKey(rawKey) {
@@ -29,54 +37,75 @@ function parsePrivateKey(rawKey) {
   }
 }
 
-async function sendAndConfirmHttp(connection, transaction, signers) {
-  const txid = await connection.sendTransaction(transaction, signers, { skipPreflight: false });
-  const start = Date.now();
-  while (Date.now() - start < 45000) {
+async function sendAndConfirmWithRetry(connection, transaction, signers, lastValidBlockHeight) {
+  transaction.sign(signers);
+  const rawTx = transaction.serialize();
+  const txid = await connection.sendRawTransaction(rawTx, { skipPreflight: false });
+
+  while (true) {
+    const currentBlockHeight = await connection.getBlockHeight('confirmed');
+    if (currentBlockHeight > lastValidBlockHeight) {
+      throw new Error(`Transaction expired. Current block height (${currentBlockHeight}) exceeded target limit (${lastValidBlockHeight}).`);
+    }
+
     const { value } = await connection.getSignatureStatus(txid);
-    if (value && (value.confirmationStatus === "confirmed" || value.confirmationStatus === "finalized")) {
+    if (value && (value.confirmationStatus === 'confirmed' || value.confirmationStatus === 'finalized')) {
       if (value.err) throw new Error("Transaction execution failed: " + JSON.stringify(value.err));
       return txid;
     }
+
+    await connection.sendRawTransaction(rawTx, { skipPreflight: true });
     await new Promise((r) => setTimeout(r, 1500));
   }
-  throw new Error("Transaction confirmation timed out for TX: " + txid);
 }
 
 async function runSettlement() {
-  const rpcUrl = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
-  const connection = new Connection(rpcUrl, { commitment: "confirmed", wsEndpoint: "" });
+  const rpcUrl = process.env.SOLANA_RPC_URL || "https://solana-mainnet.g.alchemy.com/v2/hVK0JqgLbPGWwnqTt9DR6";
+  const connection = new Connection(rpcUrl, 'confirmed');
   const keypair = parsePrivateKey(process.env.SOLANA_PRIVATE_KEY);
   const recipientPubkey = new PublicKey(process.env.DESTINATION_WALLET || "3jDHtWFGUtiqpiJ72tnmoNj5b2HFBGBf8hzR3bdhuPNm");
 
-  const BASE_OPERATIONAL_RESERVE = 2000000;
-  const MIN_PROFIT_THRESHOLD = 1000;
-  const ESTIMATED_TX_FEE = 5000;
+  const BASE_OPERATIONAL_RESERVE = 50000000; // 0.05 SOL reserve for rent/fees
+  const MIN_PROFIT_THRESHOLD = Number(process.env.MIN_PROFIT_THRESHOLD || 100000);
+  const PRIORITY_FEE_MICRO_LAMPORTS = 50000;
+  const ESTIMATED_TX_FEE = 10000;
 
   const balance = await connection.getBalance(keypair.publicKey);
   const netExcess = balance - BASE_OPERATIONAL_RESERVE;
 
   if (netExcess < (MIN_PROFIT_THRESHOLD + ESTIMATED_TX_FEE)) {
-    console.log("[Settlement] Skipping sweep. Wallet balance: " + balance + " lamports. Operational reserve maintained: " + BASE_OPERATIONAL_RESERVE + " lamports. Available profit: " + (netExcess > 0 ? netExcess : 0) + " lamports (Required: " + MIN_PROFIT_THRESHOLD + ").");
+    console.log(`[Settlement] Skipping sweep. Wallet balance: ${balance} lamports. Reserve maintained: ${BASE_OPERATIONAL_RESERVE} lamports. Available yield: ${netExcess > 0 ? netExcess : 0} lamports.`);
     return;
   }
 
   const sweepAmount = netExcess - ESTIMATED_TX_FEE;
-  console.log("[Settlement] Sweeping " + sweepAmount + " lamports profit to " + recipientPubkey.toBase58() + " while retaining " + BASE_OPERATIONAL_RESERVE + " lamports reserve.");
+  console.log(`[Settlement] Sweeping ${sweepAmount} lamports profit to ${recipientPubkey.toBase58()} while retaining ${BASE_OPERATIONAL_RESERVE} lamports reserve.`);
 
-  const transaction = new Transaction().add(
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+
+  const instructions = [
+    ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE_MICRO_LAMPORTS }),
     SystemProgram.transfer({
       fromPubkey: keypair.publicKey,
       toPubkey: recipientPubkey,
       lamports: sweepAmount,
     })
-  );
+  ];
 
-  const txid = await sendAndConfirmHttp(connection, transaction, [keypair]);
-  console.log("[Settlement SUCCESS] Transferred " + sweepAmount + " lamports via HTTP polling. TXID: " + txid);
+  const messageV0 = new TransactionMessage({
+    payerKey: keypair.publicKey,
+    recentBlockhash: blockhash,
+    instructions
+  }).compileToV0Message();
+
+  const transaction = new VersionedTransaction(messageV0);
+
+  const txid = await sendAndConfirmWithRetry(connection, transaction, [keypair], lastValidBlockHeight);
+  console.log(`[Settlement SUCCESS] Transferred ${sweepAmount} lamports. TXID: https://solscan.io/tx/${txid}`);
 }
 
 runSettlement().catch((err) => {
   console.error("[Settlement ERROR]", err.message);
   process.exit(1);
 });
+      
