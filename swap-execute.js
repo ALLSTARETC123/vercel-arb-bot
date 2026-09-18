@@ -1,25 +1,18 @@
-import { Connection, Keypair, VersionedTransaction, TransactionMessage, PublicKey } from '@solana/web3.js';
+import { Connection, Keypair, VersionedTransaction } from '@solana/web3.js';
 import { createJupiterApiClient } from '@jup-ag/api';
 import bs58 from 'bs58';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-const TOKEN_DECIMALS = {
-  'So11111111111111111111111111111111111111112': 9,
-  'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': 6,
-  'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN': 6,
-  'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263': 5
-};
 
 (async () => {
   console.log('Arbitrage scan and execution engine initialized...');
 
   const rpcUrl = process.env.SOLANA_RPC_URL;
   const privateKey = process.env.SOLANA_PRIVATE_KEY;
-  const baseTradeAmount = Number(process.env.TRADE_AMOUNT);
+  const baseTradeAmountLamports = Number(process.env.TRADE_AMOUNT);
   const minProfitThreshold = Number(process.env.MIN_PROFIT_THRESHOLD || 1000);
 
-  if (!rpcUrl || !privateKey || !baseTradeAmount) {
+  if (!rpcUrl || !privateKey || !baseTradeAmountLamports) {
     console.error('Missing required environment configuration.');
     process.exit(1);
   }
@@ -28,113 +21,94 @@ const TOKEN_DECIMALS = {
   const wallet = Keypair.fromSecretKey(bs58.decode(privateKey));
   const jupiterApi = createJupiterApiClient();
 
-  const pairs = [
-    ['So11111111111111111111111111111111111111112', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'],
-    ['EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'So11111111111111111111111111111111111111112'],
-    ['So11111111111111111111111111111111111111112', 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN'],
-    ['JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', 'So11111111111111111111111111111111111111112'],
-    ['So11111111111111111111111111111111111111112', 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'],
-    ['DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', 'So11111111111111111111111111111111111111112']
+  const solMint = 'So11111111111111111111111111111111111111112';
+  const targetIntermediateMints = [
+    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
+    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT
+    'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', // JUP
+    'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263'  // BONK
   ];
 
   let bestOpportunity = null;
-  let maxProfit = 0;
+  let maxProfit = 0n;
 
-  for (const [inputMint, outputMint] of pairs) {
+  for (const intermediateMint of targetIntermediateMints) {
     try {
-      const inputDecimals = TOKEN_DECIMALS[inputMint] || 9;
-      const scaledAmount = Math.floor(baseTradeAmount * Math.pow(10, inputDecimals - 9));
-
-      const quoteData = await jupiterApi.quoteGet({
-        inputMint,
-        outputMint,
-        amount: scaledAmount,
-        slippageBps: 50,
-        onlyDirectRoutes: false
+      // Leg 1: Quote SOL -> Intermediate Token
+      const leg1Quote = await jupiterApi.quoteGet({
+        inputMint: solMint,
+        outputMint: intermediateMint,
+        amount: baseTradeAmountLamports,
+        slippageBps: 30,
+        restrictIntermediateTokens: true
       });
 
-      if (quoteData && quoteData.outAmount && quoteData.inAmount) {
-        const inAmt = BigInt(quoteData.inAmount);
-        const outAmt = BigInt(quoteData.outAmount);
-        const estimatedProfit = Number(outAmt - inAmt);
+      if (!leg1Quote || !leg1Quote.outAmount) continue;
 
-        console.log(`Evaluated pair ${inputMint.slice(0, 4)}... -> ${outputMint.slice(0, 4)}... | Net Spread: ${estimatedProfit} lamports`);
+      // Leg 2: Quote Intermediate Token -> SOL
+      const leg2Quote = await jupiterApi.quoteGet({
+        inputMint: intermediateMint,
+        outputMint: solMint,
+        amount: Number(leg1Quote.outAmount),
+        slippageBps: 30,
+        restrictIntermediateTokens: true
+      });
 
-        if (estimatedProfit > maxProfit) {
-          maxProfit = estimatedProfit;
-          bestOpportunity = { quoteData, inputMint, outputMint, estimatedProfit };
-        }
+      if (!leg2Quote || !leg2Quote.outAmount) continue;
+
+      const inAmt = BigInt(baseTradeAmountLamports);
+      const outAmt = BigInt(leg2Quote.outAmount);
+      const netProfit = outAmt - inAmt;
+
+      console.log(`Evaluated loop SOL -> ${intermediateMint.slice(0, 4)}... -> SOL | Net Spread: ${netProfit.toString()} lamports`);
+
+      if (netProfit > maxProfit) {
+        maxProfit = netProfit;
+        bestOpportunity = {
+          quoteData: leg2Quote,
+          intermediateMint,
+          netProfit
+        };
       }
     } catch (err) {
-      console.log(`Scan warning on pair: ${err.message}`);
+      console.log(`Scan warning on mint ${intermediateMint.slice(0, 4)}...: ${err.message}`);
     }
-    await sleep(600);
+    await sleep(200);
   }
 
-  if (!bestOpportunity || bestOpportunity.estimatedProfit < minProfitThreshold) {
-    console.log(`Scan cycle finished. Highest observed spread was ${maxProfit} lamports, failing to clear threshold of ${minProfitThreshold} lamports.`);
+  if (!bestOpportunity || bestOpportunity.netProfit < BigInt(minProfitThreshold)) {
+    console.log(`Scan cycle finished. Highest observed spread was ${maxProfit.toString()} lamports, failing to clear threshold of ${minProfitThreshold} lamports.`);
     process.exit(0);
   }
 
-  console.log(`Profitable opportunity locked! Executing swap for estimated profit of ${bestOpportunity.estimatedProfit} lamports.`);
+  console.log(`Profitable opportunity locked! Executing swap sequence for estimated profit of ${bestOpportunity.netProfit.toString()} lamports.`);
 
-  const instructionsData = await jupiterApi.swapInstructionsPost({
+  const swapResponse = await jupiterApi.swapPost({
     swapRequest: {
       quoteResponse: bestOpportunity.quoteData,
       userPublicKey: wallet.publicKey.toString(),
-      wrapAndUnwrapSol: false,
-      useSharedAccounts: false
+      dynamicComputeUnitLimit: true,
+      prioritizationFeeLamports: 'auto'
     }
   });
 
-  const parseInstruction = (ix) => ({
-    programId: new PublicKey(ix.programId),
-    keys: ix.accounts.map((acc) => ({
-      pubkey: new PublicKey(acc.pubkey),
-      isSigner: acc.isSigner,
-      isWritable: acc.isWritable
-    })),
-    data: Buffer.from(ix.data, 'base64')
-  });
-
-  const ataProgramId = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
-  const rawInstructions = [
-    ...(instructionsData.computeBudgetInstructions || []),
-    ...(instructionsData.setupInstructions || []),
-    instructionsData.swapInstruction,
-    ...(instructionsData.cleanupInstruction ? [instructionsData.cleanupInstruction] : [])
-  ].filter(Boolean);
-
-  const filteredInstructions = rawInstructions
-    .filter((ix) => ix.programId !== ataProgramId)
-    .map(parseInstruction);
-
-  const addressLookupTableAccounts = [];
-  if (instructionsData.addressLookupTableAddresses && instructionsData.addressLookupTableAddresses.length > 0) {
-    for (const altAddress of instructionsData.addressLookupTableAddresses) {
-      const altAccount = await connection.getAddressLookupTable(new PublicKey(altAddress));
-      if (altAccount.value) {
-        addressLookupTableAccounts.push(altAccount.value);
-      }
-    }
+  if (!swapResponse || !swapResponse.swapTransaction) {
+    throw new Error('Failed to deserialize swap transaction from Jupiter API.');
   }
 
-  const { blockhash } = await connection.getLatestBlockhash('confirmed');
-  const messageV0 = new TransactionMessage({
-    payerKey: wallet.publicKey,
-    recentBlockhash: blockhash,
-    instructions: filteredInstructions
-  }).compileToV0Message(addressLookupTableAccounts);
-
-  const transaction = new VersionedTransaction(messageV0);
+  const transactionBuf = Buffer.from(swapResponse.swapTransaction, 'base64');
+  const transaction = VersionedTransaction.deserialize(transactionBuf);
   transaction.sign([wallet]);
 
-  const txid = await connection.sendRawTransaction(transaction.serialize(), {
-    skipPreflight: true,
-    maxRetries: 2
+  const rawTransaction = transaction.serialize();
+  const txid = await connection.sendRawTransaction(rawTransaction, {
+    skipPreflight: false,
+    maxRetries: 3
   });
+
   console.log(`Arbitrage transaction broadcasted successfully: https://solscan.io/tx/${txid}`);
 })().catch((err) => {
   console.error(`Execution error: ${err.stack || err.message}`);
   process.exit(1);
 });
+        
